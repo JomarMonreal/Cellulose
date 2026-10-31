@@ -1,0 +1,8 @@
+# Scraps local notes
+.scraps/
+
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+.env*.local

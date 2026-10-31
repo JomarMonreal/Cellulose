@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <defs>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20 0H0V20" fill="none" stroke="#433d66" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="320" height="200" fill="#1c1633"/>
+  <rect width="320" height="200" fill="url(#grid)"/>
+  <!-- glider (player 1) -->
+  <g fill="#ffe03d">
+    <rect x="61" y="41" width="18" height="18" rx="3"/>
+    <rect x="81" y="61" width="18" height="18" rx="3"/>
+    <rect x="41" y="81" width="18" height="18" rx="3"/>
+    <rect x="61" y="81" width="18" height="18" rx="3"/>
+    <rect x="81" y="81" width="18" height="18" rx="3"/>
+  </g>
+  <!-- glider (player 2) -->
+  <g fill="#9a8ae0">
+    <rect x="241" y="101" width="18" height="18" rx="3"/>
+    <rect x="221" y="121" width="18" height="18" rx="3"/>
+    <rect x="221" y="141" width="18" height="18" rx="3"/>
+    <rect x="241" y="141" width="18" height="18" rx="3"/>
+    <rect x="261" y="141" width="18" height="18" rx="3"/>
+  </g>
+  <!-- blinker -->
+  <g fill="#f8f5ff">
+    <rect x="141" y="21" width="18" height="18" rx="3"/>
+    <rect x="161" y="21" width="18" height="18" rx="3"/>
+    <rect x="181" y="21" width="18" height="18" rx="3"/>
+  </g>
+  <!-- block -->
+  <g fill="#ffe03d">
+    <rect x="141" y="141" width="18" height="18" rx="3"/>
+    <rect x="161" y="141" width="18" height="18" rx="3"/>
+    <rect x="141" y="161" width="18" height="18" rx="3"/>
+    <rect x="161" y="161" width="18" height="18" rx="3"/>
+  </g>
+</svg>

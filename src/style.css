@@ -1,0 +1,68 @@
+:root {
+  --color-ink: #120e22;
+  --color-lilac: #9a8ae0;
+  --color-yellow: #ffe03d;
+  --color-cream: #f8f5ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: var(--color-cream);
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  height: 100svh;
+}
+
+header {
+  padding: 0.75rem 1rem;
+}
+
+h1 {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 1.125rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.accent {
+  color: var(--color-yellow);
+}
+
+.frame {
+  flex: 1;
+  min-height: 0;
+  padding: 0 1rem 1rem;
+}
+
+#game {
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-lilac) 20%, transparent);
+  border-radius: 1.5rem;
+}
+
+@media (min-width: 640px) {
+  header {
+    padding: 0.75rem 2rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+  }
+  .frame {
+    padding: 0 2rem 2rem;
+  }
+}
