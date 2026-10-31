@@ -1,3 +1,11 @@
+/** The colours a player can pick in the lobby; the AIs take the ones left over, in this order. */
+export const PALETTE = [
+  { name: "Blue", color: 0x3d9bff },
+  { name: "Red", color: 0xff4d5e },
+  { name: "Green", color: 0x3ddc84 },
+  { name: "Orange", color: 0xff9a3d },
+];
+
 export default class Player {
   /** Cells this player can still place. */
   resources: number;

@@ -1,5 +1,7 @@
 import * as Phaser from "phaser";
-import MainScene from "./scenes/MainScene";
+import GameScene from "./scenes/GameScene";
+import HomeScene from "./scenes/HomeScene";
+import LobbyScene from "./scenes/LobbyScene";
 
 export function createGameConfig(parent: HTMLElement): Phaser.Types.Core.GameConfig {
   return {
@@ -16,6 +18,7 @@ export function createGameConfig(parent: HTMLElement): Phaser.Types.Core.GameCon
     // no sound yet; without this Phaser opens an AudioContext and, after the game is destroyed
     // (e.g. React's dev-mode remount), tries to suspend/resume it once it's closed
     audio: { noAudio: true },
-    scene: [MainScene],
+    // the first scene starts on boot
+    scene: [HomeScene, LobbyScene, GameScene],
   };
 }

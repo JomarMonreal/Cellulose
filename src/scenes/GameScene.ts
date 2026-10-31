@@ -2,11 +2,11 @@ import * as Phaser from "phaser";
 import Ai from "../Ai";
 import Board, { CLAIM_RADIUS } from "../Board";
 import type Cell from "../Cell";
-import Player from "../Player";
+import Player, { PALETTE } from "../Player";
+import { BTN_H, type Button, fontFamily, layoutButton, makeButton, PANEL_COLOR, PRIMARY, SECONDARY, setButtonDepth } from "../ui";
 
 const PAD = 24;
 const GENERATION_MS = 120;
-const BTN_H = 52;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 10;
 // zoom factor per wheel pixel; one mouse notch (~100px) is about 10%
@@ -29,29 +29,44 @@ const ROUND_RESOURCES = 5;
 const START_TERRITORY = 7;
 // generations between placement phases (and resource grants)
 const GRANT_EVERY = 50;
+// the game ends after this generation; the player with the most land wins
+export const FINAL_GENERATION = 1000;
 const SETUP_MS = 30_000;
 const PLACE_MS = 15_000;
 // an AI places one cell every AI_PLACE_MIN_MS..AI_PLACE_MAX_MS during a placement phase
 const AI_PLACE_MIN_MS = 150;
 const AI_PLACE_MAX_MS = 500;
-// first is the human, in the top-left corner; the rest are AIs, clockwise
-const PLAYERS = [
-  { name: "You", color: 0x3d9bff },
-  { name: "Red AI", color: 0xff4d5e },
-  { name: "Green AI", color: 0x3ddc84 },
-  { name: "Orange AI", color: 0xff9a3d },
-];
+// corners clockwise from the human's top-left: one opponent sits across the board, two take the corners beside you
+const AI_CORNERS: Record<number, number[]> = { 1: [2], 2: [1, 3], 3: [1, 2, 3] };
 const PLAYER_ROW_H = 46;
+// the results panel draws over everything else
+const RESULTS_DEPTH = 10;
 
-type Button = { rect: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text };
-/** setup: the opening placement window; placing: the window every GRANT_EVERY generations; running: the simulation. */
-type Phase = "setup" | "placing" | "running";
+/** setup: the opening placement window; placing: the window every GRANT_EVERY generations; running: the simulation; over: past FINAL_GENERATION. */
+type Phase = "setup" | "placing" | "running" | "over";
 
-export default class MainScene extends Phaser.Scene {
+/** Chosen in the lobby. */
+export type GameSettings = {
+  /** Index into PALETTE of the human's colour. */
+  color: number;
+  /** Number of AI opponents, 1 to 3. */
+  opponents: number;
+};
+
+type Results = {
+  shade: Phaser.GameObjects.Rectangle;
+  panel: Phaser.GameObjects.Rectangle;
+  title: Phaser.GameObjects.Text;
+  standings: Phaser.GameObjects.Text;
+  button: Button;
+};
+
+export default class GameScene extends Phaser.Scene {
   constructor() {
-    super("MainScene");
+    super("GameScene");
   }
 
+  private settings!: GameSettings;
   private board!: Board;
   // Graphics, not Rectangles: a resized Rectangle's stroke keeps its old path
   private graphics!: Phaser.GameObjects.Graphics;
@@ -61,7 +76,8 @@ export default class MainScene extends Phaser.Scene {
   private sidebar!: Phaser.GameObjects.Rectangle;
   private title!: Phaser.GameObjects.Text;
   // the title's height on one line, to tell how much it grows when it wraps
-  private titleLineH = 0;
+  private titleLineH!: number;
+  private quitText!: Phaser.GameObjects.Text;
   private generationText!: Phaser.GameObjects.Text;
   private phaseText!: Phaser.GameObjects.Text;
   private playButton!: Button;
@@ -71,68 +87,96 @@ export default class MainScene extends Phaser.Scene {
   private zoomInButton!: Button;
   // an HTML input so the zoom percentage can be typed in
   private zoomInput!: Phaser.GameObjects.DOMElement;
-  private playerSwatches: Phaser.GameObjects.Rectangle[] = [];
-  private playerTexts: Phaser.GameObjects.Text[] = [];
+  private playerSwatches!: Phaser.GameObjects.Rectangle[];
+  private playerTexts!: Phaser.GameObjects.Text[];
   private instructions!: Phaser.GameObjects.Text;
+  // shown once the game is over
+  private results?: Results;
 
   private ticker!: Phaser.Time.TimerEvent;
-  private generation = 0;
+  private generation!: number;
 
-  private players: Player[] = [];
+  private players!: Player[];
   private human!: Player;
-  private phase: Phase = "setup";
+  private phase!: Phase;
   // ms left in the current setup/placing phase
-  private phaseLeft = SETUP_MS;
-  private paused = false;
+  private phaseLeft!: number;
+  private paused!: boolean;
   // cells placed this phase; the human can click theirs again to take them back
-  private placedThisPhase = new Set<Cell>();
-  private ais: Ai[] = [];
+  private placedThisPhase!: Set<Cell>;
+  private ais!: Ai[];
   // ms until each AI's next placement
-  private aiCooldowns = new Map<Ai, number>();
+  private aiCooldowns!: Map<Ai, number>;
 
   /** Screen area the board is shown in; the board itself may be larger (zoomed) and offset (panned). */
-  private view = new Phaser.Geom.Rectangle();
-  private zoom = 1;
+  private view!: Phaser.Geom.Rectangle;
+  private zoom!: number;
   // board top-left relative to the view, as a fraction of view size so it survives resizes
-  private panX = 0;
-  private panY = 0;
+  private panX!: number;
+  private panY!: number;
   // pressed: the pointer went down on the board; panning: it has since moved far enough to count as a drag
-  private pressed = false;
-  private panning = false;
+  private pressed!: boolean;
+  private panning!: boolean;
 
-  preload() {}
+  /** Phaser reuses the scene object for every game, so all per-game state starts here rather than in field initializers. */
+  init(settings: GameSettings) {
+    this.settings = settings;
+    this.playerSwatches = [];
+    this.playerTexts = [];
+    this.results = undefined;
+    this.generation = 0;
+    this.players = [];
+    this.phase = "setup";
+    this.phaseLeft = SETUP_MS;
+    this.paused = false;
+    this.placedThisPhase = new Set();
+    this.ais = [];
+    this.aiCooldowns = new Map();
+    this.view = new Phaser.Geom.Rectangle();
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this.pressed = false;
+    this.panning = false;
+  }
 
   create() {
-    // use the site's font for canvas text
-    const fontFamily = getComputedStyle(document.body).fontFamily;
+    const font = fontFamily();
 
     this.graphics = this.add.graphics();
     this.frame = this.add.graphics();
     this.board = new Board(0, 0, 1, 50);
     this.createPlayers();
 
-    this.sidebar = this.add.rectangle(0, 0, 1, 1, 0x1c1633).setOrigin(0);
-    this.title = this.add.text(0, 0, "Cellulose", { fontFamily, fontSize: "24px", fontStyle: "bold", color: "#f8f5ff" });
+    this.sidebar = this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0);
+    this.title = this.add.text(0, 0, "Cellulose", { fontFamily: font, fontSize: "24px", fontStyle: "bold", color: "#f8f5ff" });
     this.titleLineH = this.title.height;
-    this.generationText = this.add.text(0, 0, "", { fontFamily, fontSize: "16px", color: "#d4ccff" });
-    this.phaseText = this.add.text(0, 0, "", { fontFamily, fontSize: "16px", fontStyle: "bold", color: "#ffe03d" });
-    this.playButton = this.makeButton("Play", fontFamily, 0xffe03d, 0xfff2a1, "#120e22", () => this.play());
-    this.stopButton = this.makeButton("Stop", fontFamily, 0x5b4b9a, 0x6e5db0, "#f8f5ff", () => this.setPaused(true));
+    this.quitText = this.add
+      .text(0, 0, "Quit", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" })
+      .setOrigin(1, 0)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => this.quitText.setColor("#ffe03d"))
+      .on("pointerout", () => this.quitText.setColor("#d4ccff"))
+      .on("pointerdown", () => this.toLobby());
+    this.generationText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", color: "#d4ccff" });
+    this.phaseText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#ffe03d" });
+    this.playButton = makeButton(this, "Play", PRIMARY, () => this.play());
+    this.stopButton = makeButton(this, "Stop", SECONDARY, () => this.setPaused(true));
 
-    this.zoomLabel = this.add.text(0, 0, "Zoom", { fontFamily, fontSize: "16px", color: "#d4ccff" });
-    this.zoomOutButton = this.makeButton("−", fontFamily, 0x5b4b9a, 0x6e5db0, "#f8f5ff", () => this.zoomAtCenter(this.zoom / ZOOM_STEP));
-    this.zoomInButton = this.makeButton("+", fontFamily, 0x5b4b9a, 0x6e5db0, "#f8f5ff", () => this.zoomAtCenter(this.zoom * ZOOM_STEP));
-    this.zoomInput = this.add.dom(0, 0, this.makeZoomInput(fontFamily)).setOrigin(0);
+    this.zoomLabel = this.add.text(0, 0, "Zoom", { fontFamily: font, fontSize: "16px", color: "#d4ccff" });
+    this.zoomOutButton = makeButton(this, "−", SECONDARY, () => this.zoomAtCenter(this.zoom / ZOOM_STEP));
+    this.zoomInButton = makeButton(this, "+", SECONDARY, () => this.zoomAtCenter(this.zoom * ZOOM_STEP));
+    this.zoomInput = this.add.dom(0, 0, this.makeZoomInput(font)).setOrigin(0);
 
     for (const p of this.players) {
       this.playerSwatches.push(this.add.rectangle(0, 0, 14, 14, p.main_color).setOrigin(0));
-      this.playerTexts.push(this.add.text(0, 0, "", { fontFamily, fontSize: "14px", color: "#f8f5ff", lineSpacing: 2 }));
+      this.playerTexts.push(this.add.text(0, 0, "", { fontFamily: font, fontSize: "14px", color: "#f8f5ff", lineSpacing: 2 }));
     }
-    this.instructions = this.add.text(0, 0, this.instructionsText(), { fontFamily, fontSize: "13px", color: "#d4ccff", lineSpacing: 3 });
+    this.instructions = this.add.text(0, 0, this.instructionsText(), { fontFamily: font, fontSize: "13px", color: "#d4ccff", lineSpacing: 3 });
 
     // drag pans the board; a click (press and release without dragging) places or takes back a cell
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      this.pressed = this.view.contains(p.x, p.y);
+      this.pressed = this.phase !== "over" && this.view.contains(p.x, p.y);
       this.panning = false;
     });
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
@@ -161,7 +205,7 @@ export default class MainScene extends Phaser.Scene {
 
     // scroll to zoom, keeping the point under the cursor fixed
     this.input.on("wheel", (p: Phaser.Input.Pointer, _objs: unknown, _dx: number, dy: number) => {
-      if (!this.view.contains(p.x, p.y)) return;
+      if (this.phase === "over" || !this.view.contains(p.x, p.y)) return;
       this.zoomAt(this.zoom * Math.exp(-dy * ZOOM_SPEED), p.x, p.y);
     });
 
@@ -173,7 +217,8 @@ export default class MainScene extends Phaser.Scene {
         this.board.step();
         this.board.claimTerritory();
         this.generation++;
-        if (this.generation % GRANT_EVERY === 0) {
+        if (this.generation >= FINAL_GENERATION) this.finish();
+        else if (this.generation % GRANT_EVERY === 0) {
           this.grantResources();
           this.startPhase("placing", PLACE_MS);
         }
@@ -192,7 +237,7 @@ export default class MainScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this));
   }
 
-  /** One player per corner, each with a starting square of territory. */
+  /** The human in the top-left corner and each AI in its own corner, each with a starting square of territory. */
   private createPlayers() {
     const n = this.board.tiles;
     const s = START_TERRITORY;
@@ -203,38 +248,36 @@ export default class MainScene extends Phaser.Scene {
       [n - s, n - s],
       [n - s, 0],
     ];
-    this.players = PLAYERS.map(({ name, color }, i) => new Player(name, color, i > 0, START_RESOURCES));
+    const { color, opponents } = this.settings;
+    const others = PALETTE.filter((_, i) => i !== color).slice(0, opponents);
+    this.players = [
+      new Player("You", PALETTE[color].color, false, START_RESOURCES),
+      ...others.map((o) => new Player(`${o.name} AI`, o.color, true, START_RESOURCES)),
+    ];
+    const slots = [0, ...AI_CORNERS[opponents]];
     this.players.forEach((p, i) => {
-      this.board.setTerritory(p, corners[i][0], corners[i][1], s, s);
+      const [row, col] = corners[slots[i]];
+      this.board.setTerritory(p, row, col, s, s);
       p.territory_at_last_grant = s * s;
     });
     this.human = this.players[0];
     this.ais = this.players.filter((p) => p.is_ai).map((p) => new Ai(p, this.board));
   }
 
-  private makeButton(text: string, fontFamily: string, fill: number, hover: number, textColor: string, onClick: () => void): Button {
-    const rect = this.add.rectangle(0, 0, 1, 1, fill).setOrigin(0).setInteractive({ useHandCursor: true });
-    const label = this.add.text(0, 0, text, { fontFamily, fontSize: "20px", fontStyle: "bold", color: textColor }).setOrigin(0.5);
-    rect.on("pointerover", () => rect.setFillStyle(hover));
-    rect.on("pointerout", () => rect.setFillStyle(fill));
-    rect.on("pointerdown", onClick);
-    return { rect, label };
-  }
-
-  private layoutButton({ rect, label }: Button, x: number, y: number, w: number) {
-    rect.setPosition(x, y).setSize(w, BTN_H);
-    // setSize doesn't update the click area, so keep it in sync
-    (rect.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, w, BTN_H);
-    label.setPosition(x + w / 2, y + BTN_H / 2);
+  /** Back to the lobby with the same settings, ready for another game. */
+  private toLobby() {
+    this.scene.start("LobbyScene", this.settings);
   }
 
   /** Play resumes when paused; during a placement phase it ends the phase early ("Ready"). */
   private play() {
+    if (this.phase === "over") return;
     if (this.paused) this.setPaused(false);
     else if (this.phase !== "running") this.endPhase();
   }
 
   private setPaused(paused: boolean) {
+    if (this.phase === "over") return;
     this.paused = paused;
     this.syncTicker();
   }
@@ -242,17 +285,19 @@ export default class MainScene extends Phaser.Scene {
   /** The simulation only runs outside placement phases and while not paused. */
   private syncTicker() {
     this.ticker.paused = this.paused || this.phase !== "running";
-    const playActive = this.paused || this.phase !== "running";
-    this.playButton.label.setText(!this.paused && this.phase !== "running" ? "Ready" : "Play");
+    const over = this.phase === "over";
+    const playActive = !over && (this.paused || this.phase !== "running");
+    const stopActive = !over && !this.paused;
+    this.playButton.label.setText(!this.paused && (this.phase === "setup" || this.phase === "placing") ? "Ready" : "Play");
     // dim whichever button doesn't apply right now
     this.playButton.rect.setAlpha(playActive ? 1 : 0.4);
     this.playButton.label.setAlpha(playActive ? 1 : 0.4);
-    this.stopButton.rect.setAlpha(this.paused ? 0.4 : 1);
-    this.stopButton.label.setAlpha(this.paused ? 0.4 : 1);
+    this.stopButton.rect.setAlpha(stopActive ? 1 : 0.4);
+    this.stopButton.label.setAlpha(stopActive ? 1 : 0.4);
     this.updatePhaseText();
   }
 
-  private startPhase(phase: Exclude<Phase, "running">, ms: number) {
+  private startPhase(phase: "setup" | "placing", ms: number) {
     this.phase = phase;
     this.phaseLeft = ms;
     this.placedThisPhase.clear();
@@ -273,6 +318,38 @@ export default class MainScene extends Phaser.Scene {
     this.syncTicker();
     this.updatePlayerTexts();
     this.board.draw(this.graphics, this.view);
+  }
+
+  /** Stop the simulation and show who claimed the most land. */
+  private finish() {
+    this.phase = "over";
+    this.syncTicker();
+    // the zoom field is HTML, so it would sit on top of the results panel
+    this.zoomInput.setVisible(false);
+    this.input.setDefaultCursor("default");
+
+    const land = new Map(this.players.map((p) => [p, this.board.territoryOf(p)]));
+    const ranked = [...this.players].sort((a, b) => land.get(b)! - land.get(a)!);
+    const best = land.get(ranked[0])!;
+    const winners = ranked.filter((p) => land.get(p) === best);
+    let headline: string;
+    if (winners.length > 1) headline = winners.includes(this.human) ? "It's a draw!" : "No winner: a draw";
+    else headline = winners[0] === this.human ? "You win!" : `${winners[0].name} wins`;
+    const standings = ranked.map((p, i) => `${i + 1}.  ${p.name}: ${land.get(p)} land`).join("\n");
+
+    const font = fontFamily();
+    const results: Results = {
+      // interactive so it catches clicks meant for the sidebar buttons underneath
+      shade: this.add.rectangle(0, 0, 1, 1, 0x120e22, 0.75).setOrigin(0).setInteractive(),
+      panel: this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0),
+      title: this.add.text(0, 0, headline, { fontFamily: font, fontSize: "32px", fontStyle: "bold", color: "#ffe03d", align: "center" }).setOrigin(0.5, 0),
+      standings: this.add.text(0, 0, standings, { fontFamily: font, fontSize: "18px", color: "#f8f5ff", lineSpacing: 8 }).setOrigin(0.5, 0),
+      button: makeButton(this, "Back to lobby", PRIMARY, () => this.toLobby()),
+    };
+    for (const o of [results.shade, results.panel, results.title, results.standings]) o.setDepth(RESULTS_DEPTH);
+    setButtonDepth(results.button, RESULTS_DEPTH);
+    this.results = results;
+    this.layoutResults(this.scale.gameSize);
   }
 
   /** Every player earns ROUND_RESOURCES cells plus floor(cbrt(territory gained since the last grant)). */
@@ -297,7 +374,7 @@ export default class MainScene extends Phaser.Scene {
    * Only cells placed this phase are refunded; older ones (and any born from them) just disappear.
    */
   private humanClick(cell: Cell) {
-    if (this.paused || this.phase === "running") return;
+    if (this.paused || this.phase === "running" || this.phase === "over") return;
     const p = this.human;
     if (cell.is_alive && cell.owner === p) {
       cell.is_alive = false;
@@ -322,16 +399,19 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private updateGenerationText() {
-    this.generationText.setText(`Generation ${this.generation}`);
+    this.generationText.setText(`Generation ${this.generation} / ${FINAL_GENERATION}`);
   }
 
   private updatePhaseText() {
     const secs = Math.ceil(this.phaseLeft / 1000);
+    const nextGrant = GRANT_EVERY - (this.generation % GRANT_EVERY);
     let text: string;
-    if (this.paused) text = "Paused";
+    if (this.phase === "over") text = "Game over";
+    else if (this.paused) text = "Paused";
     else if (this.phase === "setup") text = `Setup: place cells (${secs}s)`;
     else if (this.phase === "placing") text = `Place cells (${secs}s)`;
-    else text = `Next placement in ${GRANT_EVERY - (this.generation % GRANT_EVERY)} gens`;
+    else if (this.generation + nextGrant >= FINAL_GENERATION) text = `Game ends in ${FINAL_GENERATION - this.generation} gens`;
+    else text = `Next placement in ${nextGrant} gens`;
     this.phaseText.setText(text);
   }
 
@@ -342,6 +422,7 @@ export default class MainScene extends Phaser.Scene {
       "• A cell lives on with 2 or 3 neighbours. An empty tile with exactly 3 comes alive for the colour with the most of them.",
       `• Live cells claim the land ${CLAIM_RADIUS} tiles around them.`,
       `• Every ${GRANT_EVERY} generations: ${PLACE_MS / 1000}s to place, +${ROUND_RESOURCES} cells, plus the cube root of land gained.`,
+      `• After generation ${FINAL_GENERATION}, whoever holds the most land wins.`,
       "• Drag to pan, scroll to zoom.",
     ].join("\n");
   }
@@ -369,6 +450,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   private zoomAtCenter(zoom: number) {
+    if (this.phase === "over") return;
     this.zoomAt(zoom, this.view.centerX, this.view.centerY);
   }
 
@@ -458,8 +540,8 @@ export default class MainScene extends Phaser.Scene {
     const sw = wide ? Phaser.Math.Clamp(width * 0.24, 200, 320) : width - PAD * 2;
 
     // wrap first: a title that wraps pushes everything below it down, and the narrow
-    // sidebar must be tall enough for the instructions
-    this.title.setWordWrapWidth(sw - 40);
+    // sidebar must be tall enough for the instructions. The title leaves room for Quit.
+    this.title.setWordWrapWidth(sw - 100);
     this.instructions.setWordWrapWidth(sw - 40);
     const extra = this.title.height - this.titleLineH;
 
@@ -485,6 +567,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.sidebar.setPosition(sx, sy).setSize(sw, sh);
     this.title.setPosition(sx + 20, sy + 20);
+    this.quitText.setPosition(sx + sw - 20, sy + 26);
     // everything under the title starts lower by however much the title wrapped
     const top = sy + extra;
     this.generationText.setPosition(sx + 20, top + 58);
@@ -493,17 +576,17 @@ export default class MainScene extends Phaser.Scene {
     // Play and Stop side by side
     const gap = 12;
     const btnW = (sw - 40 - gap) / 2;
-    this.layoutButton(this.playButton, sx + 20, top + 116, btnW);
-    this.layoutButton(this.stopButton, sx + 20 + btnW + gap, top + 116, btnW);
+    layoutButton(this.playButton, sx + 20, top + 116, btnW);
+    layoutButton(this.stopButton, sx + 20 + btnW + gap, top + 116, btnW);
 
     // Zoom: [-] [ 150% ] [+]
     this.zoomLabel.setPosition(sx + 20, top + 186);
     const zy = top + 212;
     const inputW = sw - 40 - (BTN_H + gap) * 2;
-    this.layoutButton(this.zoomOutButton, sx + 20, zy, BTN_H);
+    layoutButton(this.zoomOutButton, sx + 20, zy, BTN_H);
     this.zoomInput.setPosition(sx + 20 + BTN_H + gap, zy);
     (this.zoomInput.node as HTMLInputElement).style.width = `${inputW}px`;
-    this.layoutButton(this.zoomInButton, sx + sw - 20 - BTN_H, zy, BTN_H);
+    layoutButton(this.zoomInButton, sx + sw - 20 - BTN_H, zy, BTN_H);
 
     // one row per player: colour swatch, name, then stats
     this.players.forEach((_, i) => {
@@ -514,11 +597,29 @@ export default class MainScene extends Phaser.Scene {
     this.updatePlayerTexts();
 
     this.instructions.setPosition(sx + 20, top + 300 + PLAYER_ROW_H * this.players.length);
+    if (this.results) this.layoutResults({ width, height });
+  }
+
+  /** Results panel centred over the whole screen. */
+  private layoutResults({ width, height }: { width: number; height: number }) {
+    const r = this.results!;
+    const pw = Math.min(420, width - PAD * 2);
+    // wrap before measuring, so a long headline makes the panel taller
+    r.title.setWordWrapWidth(pw - 40);
+    const ph = 40 + r.title.height + 24 + r.standings.height + 32 + BTN_H + 32;
+    const px = (width - pw) / 2;
+    const py = Math.max(PAD, (height - ph) / 2);
+    r.shade.setSize(width, height);
+    (r.shade.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, width, height);
+    r.panel.setPosition(px, py).setSize(pw, ph);
+    r.title.setPosition(width / 2, py + 40);
+    r.standings.setPosition(width / 2, py + 40 + r.title.height + 24);
+    layoutButton(r.button, px + 32, py + ph - 32 - BTN_H, pw - 64);
   }
 
   /** Counts down setup/placement phases and lets the AIs place their cells over time. */
   update(_time: number, delta: number) {
-    if (this.paused || this.phase === "running") return;
+    if (this.paused || this.phase === "running" || this.phase === "over") return;
     this.phaseLeft -= delta;
     let placed = false;
     for (const [ai, left] of this.aiCooldowns) {

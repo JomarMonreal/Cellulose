@@ -30,7 +30,10 @@ src/
   main.ts                   # boots Phaser once the font is loaded
   style.css                 # colour tokens and page layout
   config.ts                 # Phaser game config
-  scenes/MainScene.ts       # board, UI, input, zoom
+  ui.ts                     # shared buttons and colours
+  scenes/HomeScene.ts       # title screen
+  scenes/LobbyScene.ts      # colour and opponent picker
+  scenes/GameScene.ts       # board, UI, input, zoom, end-of-game results
   Board.ts, Cell.ts         # Game of Life grid and territory
   Player.ts, Ai.ts          # players and AI opponent
   patterns.ts               # placeable patterns
