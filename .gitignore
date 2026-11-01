@@ -6,3 +6,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env*.local
+
+# local settings; production values are set in Cloudflare Pages
+.env
