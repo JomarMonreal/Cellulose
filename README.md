@@ -20,9 +20,28 @@ npm run build
 npm run preview
 ```
 
+## Ways to play
+
+Every way has two modes: **Strongest 500** (most land after 500 generations) and **Capture the flag** (a rival's land over your flag knocks you out; last colony standing wins).
+
+- **Play with bots** runs entirely in the browser, against local AIs.
+- **Play with friends** creates or joins a room on [CelluloseServer](../CelluloseServer), which holds the true board. The client only sends requests (place, remove, ready) and draws what the server broadcasts.
+You sign in (or sign up) on the first screen before choosing any of these; a sign-in is remembered across visits.
+
+- **Play classic** finds a 4-player match against other players, with no ratings at stake. Guests can play it.
+- **Play ranked** is the same match, but rated, with tiers from Species up to Domain. It needs an account.
+
+While you wait for a classic or ranked match you can play with bots; the game jumps to the match once it's found. The sign-in screen also has **Play as guest**: everything but ranked, under a name like `Guest4821`, for that browser tab.
+
+The online modes connect to port 3000 on the host that served the page by default. Point them somewhere else with `VITE_SERVER_URL`:
+
+```bash
+VITE_SERVER_URL=http://localhost:3100 npm run dev
+```
+
 ## Project structure
 
-```
+```text
 index.html                  # page shell, header, game container
 public/
   cellulose.svg             # key art / favicon
@@ -33,6 +52,12 @@ src/
   ui.ts                     # shared buttons and colours
   scenes/HomeScene.ts       # title screen
   scenes/LobbyScene.ts      # colour and opponent picker
+  scenes/OnlineLobbyScene.ts # create or join a room on the server
+  scenes/RankedScene.ts     # sign in, ratings, find a ranked match
+  modes.ts                  # the game modes
+  net/Online.ts             # connection to the server (requests, sign-in, queue, latest lobby and game state)
+  net/QueueBanner.ts        # "finding a match" strip shown on every screen while queued
+  net/protocol.ts           # message types, copied from CelluloseServer
   scenes/GameScene.ts       # board, UI, input, zoom, end-of-game results
   Board.ts, Cell.ts         # Game of Life grid and territory
   Player.ts, Ai.ts          # players and AI opponent

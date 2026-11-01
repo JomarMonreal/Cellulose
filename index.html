@@ -6,18 +6,27 @@
     <meta name="theme-color" content="#120e22" />
     <meta name="description" content="A competitive take on Conway's Game of Life, playable in the browser." />
     <title>Cellulose: Conway's Competitive Game of Life</title>
-    <link rel="icon" href="/cellulose.svg" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <meta property="og:title" content="Cellulose: Conway's Competitive Game of Life" />
+    <meta property="og:description" content="A competitive take on Conway's Game of Life, playable in the browser." />
+    <meta property="og:image" content="/logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;700;800&display=swap" rel="stylesheet" />
   </head>
   <body>
+    <canvas id="bg" aria-hidden="true"></canvas>
     <main>
       <header>
+        <img class="logo" src="/logo.png" alt="" width="40" height="40" />
         <h1><span class="accent">Cellulose</span>: Conway's Competitive Game of Life</h1>
       </header>
       <div class="frame">
-        <div id="game"></div>
+        <div id="game">
+          <!-- until the font has loaded and the game has booted (main.ts removes it) -->
+          <div class="boot-loader" role="status"><span class="spinner"></span>Loading…</div>
+        </div>
       </div>
     </main>
     <script type="module" src="/src/main.ts"></script>

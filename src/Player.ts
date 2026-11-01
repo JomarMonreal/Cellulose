@@ -11,6 +11,8 @@ export default class Player {
   resources: number;
   /** Territory size at the last resource grant; growth since then earns more resources. */
   territory_at_last_grant = 0;
+  /** Capture the flag: the generation this player's flag was taken, or null while it stands. */
+  captured_at: number | null = null;
 
   constructor(
     public name: string,

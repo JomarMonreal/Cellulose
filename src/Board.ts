@@ -3,6 +3,11 @@ import Cell from "./Cell";
 import type Player from "./Player";
 
 const ALIVE_COLOR = 0xffffff;
+// empty tiles and grid lines in the site's ink and lilac, so the board sits in the page rather than on it
+const EMPTY_COLOR = 0x15112a;
+const GRID_COLOR = 0x2b2448;
+// empty tiles in a player's territory take on this much of their colour, so you can see where you may place
+const TERRITORY_TINT = 0.16;
 const GRID_LINE = 1;
 // territory outlines are twice as thick as the grid lines
 const TERRITORY_LINE = GRID_LINE * 2;
@@ -131,12 +136,18 @@ export default class Board {
 
   /** Draw the board, clipped to `clip` (the visible board area) so a zoomed or panned board doesn't spill out. */
   draw(g: Phaser.GameObjects.Graphics, clip: Phaser.Geom.Rectangle) {
-    g.clear().lineStyle(GRID_LINE, 0xaaaaaa);
+    g.clear().lineStyle(GRID_LINE, GRID_COLOR);
+    const tints = new Map<Player, number>();
+    const tint = (p: Player) => {
+      let t = tints.get(p);
+      if (t === undefined) tints.set(p, (t = mix(EMPTY_COLOR, p.main_color, TERRITORY_TINT)));
+      return t;
+    };
     for (const row of this.cells) {
       for (const c of row) {
         const r = clipRect(clip, c.x, c.y, c.w, c.h);
         if (!r) continue;
-        const color = c.is_alive ? (c.owner?.main_color ?? ALIVE_COLOR) : c.color;
+        const color = c.is_alive ? (c.owner?.main_color ?? ALIVE_COLOR) : c.territory ? tint(c.territory) : EMPTY_COLOR;
         g.fillStyle(color).fillRect(...r).strokeRect(...r);
       }
     }
@@ -162,6 +173,12 @@ export default class Board {
       }
     }
   }
+}
+
+/** `a` blended `t` of the way towards `b`, as 0xRRGGBB. */
+function mix(a: number, b: number, t: number) {
+  const ch = (shift: number) => Math.round(((a >> shift) & 255) * (1 - t) + ((b >> shift) & 255) * t) << shift;
+  return ch(16) | ch(8) | ch(0);
 }
 
 /** The part of a rect inside `clip` as [x, y, w, h], or null if none of it is. */

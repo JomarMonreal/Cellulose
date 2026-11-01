@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { MODES } from "../modes";
 import { PALETTE } from "../Player";
 import { BTN_H, type Button, fontFamily, layoutButton, makeButton, PANEL_COLOR, PRIMARY, SECONDARY, setButtonStyle } from "../ui";
 import { FINAL_GENERATION, type GameSettings } from "./GameScene";
@@ -7,7 +8,7 @@ const PAD = 24;
 const GAP = 12;
 const MAX_OPPONENTS = PALETTE.length - 1;
 
-/** Single-player setup: pick your colour and how many AI colonies to face, then start. */
+/** Single-player setup: pick the mode, your colour and how many AI colonies to face, then start. */
 export default class LobbyScene extends Phaser.Scene {
   constructor() {
     super("LobbyScene");
@@ -17,6 +18,8 @@ export default class LobbyScene extends Phaser.Scene {
 
   private panel!: Phaser.GameObjects.Rectangle;
   private title!: Phaser.GameObjects.Text;
+  private modeLabel!: Phaser.GameObjects.Text;
+  private modeButtons!: Button[];
   private colorLabel!: Phaser.GameObjects.Text;
   private swatches!: Button[];
   private opponentsLabel!: Phaser.GameObjects.Text;
@@ -27,7 +30,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   /** Coming back from a game keeps that game's settings. */
   init(data: Partial<GameSettings>) {
-    this.settings = { color: data.color ?? 0, opponents: data.opponents ?? MAX_OPPONENTS };
+    this.settings = { color: data.color ?? 0, opponents: data.opponents ?? MAX_OPPONENTS, mode: data.mode ?? "strongest500" };
   }
 
   create() {
@@ -35,7 +38,15 @@ export default class LobbyScene extends Phaser.Scene {
     const labelStyle = { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
 
     this.panel = this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0);
-    this.title = this.add.text(0, 0, "New game", { fontFamily: font, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
+    this.title = this.add.text(0, 0, "Play with bots", { fontFamily: font, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
+    this.modeLabel = this.add.text(0, 0, "Mode", labelStyle);
+    this.modeButtons = MODES.map((m) =>
+      makeButton(this, m.name, SECONDARY, () => {
+        this.settings.mode = m.id;
+        this.refresh();
+      }),
+    );
+    for (const b of this.modeButtons) b.label.setFontSize(17);
     this.colorLabel = this.add.text(0, 0, "", labelStyle);
     this.swatches = PALETTE.map(({ color }, i) =>
       makeButton(this, "", { fill: color, hover: color, text: "#120e22" }, () => {
@@ -60,16 +71,18 @@ export default class LobbyScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this));
   }
 
-  /** Show the current choices: a tick on the chosen colour, the chosen opponent count lit up, and who you'll face. */
+  /** Show the current choices: the mode and opponent count lit up, a tick on the chosen colour, and who you'll face. */
   private refresh() {
-    const { color, opponents } = this.settings;
+    const { color, opponents, mode } = this.settings;
+    this.modeButtons.forEach((b, i) => setButtonStyle(b, MODES[i].id === mode ? PRIMARY : SECONDARY));
     this.colorLabel.setText(`Your colour: ${PALETTE[color].name}`);
     this.swatches.forEach((b, i) => b.label.setText(i === color ? "✓" : ""));
     this.opponentButtons.forEach((b, i) => setButtonStyle(b, i + 1 === opponents ? PRIMARY : SECONDARY));
     const rivals = PALETTE.filter((_, i) => i !== color)
       .slice(0, opponents)
       .map((p) => `${p.name} AI`);
-    this.matchup.setText(`You vs ${rivals.join(", ")}\n${FINAL_GENERATION} generations. Most land at the end wins.`);
+    const rule = mode === "ctf" ? MODES.find((m) => m.id === "ctf")!.rule : `${FINAL_GENERATION} generations. Most land at the end wins.`;
+    this.matchup.setText(`You vs ${rivals.join(", ")}\n${rule}`);
   }
 
   /** A centred panel; rows of equal-width buttons fill its width. */
@@ -77,7 +90,7 @@ export default class LobbyScene extends Phaser.Scene {
     const pw = Math.min(460, width - PAD * 2);
     const inner = pw - 64;
     this.matchup.setWordWrapWidth(inner);
-    const ph = 32 + this.title.height + 28 + 24 + BTN_H + 28 + 24 + BTN_H + 24 + this.matchup.height + 32 + BTN_H + 32;
+    const ph = 32 + this.title.height + 28 + (24 + BTN_H + 28) * 3 - 4 + this.matchup.height + 32 + BTN_H + 32;
     const px = (width - pw) / 2;
     const py = Math.max(PAD, (height - ph) / 2);
     const x = px + 32;
@@ -86,6 +99,11 @@ export default class LobbyScene extends Phaser.Scene {
     let y = py + 32;
     this.title.setPosition(x, y);
     y += this.title.height + 28;
+
+    this.modeLabel.setPosition(x, y);
+    y += 24;
+    this.layoutRow(this.modeButtons, x, y, inner);
+    y += BTN_H + 28;
 
     this.colorLabel.setPosition(x, y);
     y += 24;
