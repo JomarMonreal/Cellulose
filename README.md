@@ -22,7 +22,7 @@ npm run preview
 
 ## Ways to play
 
-Apart from the playground, every way has two modes: **Strongest 500** (most land after 500 generations) and **Capture the flag** (a rival's land over your flag knocks you out; last colony standing wins, or the most land after 1000 generations).
+Apart from the playground and tutorial, every way has two modes: **Strongest 500** (most land after 500 generations) and **Capture the flag** (a rival's land over your flag knocks you out; last colony standing wins, or the most land after 1000 generations).
 
 - **Play with bots** runs entirely in the browser, against local AIs.
 - **Play with friends** creates or joins a room on [CelluloseServer](../CelluloseServer), which holds the true board. The client only sends requests (place, remove, ready) and draws what the server broadcasts.
@@ -30,6 +30,7 @@ You sign in (or sign up) on the first screen before choosing any of these; a sig
 
 - **Play classic** finds a 4-player match against other players, with no ratings at stake. Guests can play it.
 - **Play ranked** is the same match, but rated, with tiers from Species up to Domain. It needs an account.
+- **Tutorial** lists patterns worth knowing, drawn and explained by kind: still lifes, oscillators, spaceships, guns and methuselahs.
 - **Playground** is a sandbox for plain Game of Life, in the browser: draw cells in any of the four colours, then play, pause, speed up (up to 16×) or clear, and set how many generations it runs. Colours mix as they do in a game, but there's no territory and no one to beat.
 
 While you wait for a classic or ranked match you can play with bots or in the playground; the game jumps to the match once it's found. The sign-in screen also has **Play as guest**: everything but ranked, under a name like `Guest4821`, for that browser tab.
@@ -62,9 +63,10 @@ src/
   net/protocol.ts           # message types, copied from CelluloseServer
   scenes/GameScene.ts       # board, UI, input, zoom, end-of-game results
   scenes/PlaygroundScene.ts # sandbox: draw, play, pause, speed up, clear
+  scenes/TutorialScene.ts   # patterns by kind, drawn and explained
   Board.ts, Cell.ts         # Game of Life grid and territory
   Player.ts, Ai.ts          # players and AI opponent
-  patterns.ts               # placeable patterns
+  patterns.ts               # placeable patterns, and the tutorial's guide
 ```
 
 History before the split lives in the NoromonStudio repo, up to commit `5af584b`.

@@ -17,7 +17,7 @@ const BUTTON_GAP = 12;
 
 /**
  * Title screen: the game's name, a row of gliders in the player colours, and play with bots, with friends,
- * classic (matchmade, unrated) or ranked, or the playground. Guests see ranked dimmed; choosing it asks them to sign in.
+ * classic (matchmade, unrated) or ranked, the playground, or the tutorial. Guests see ranked dimmed; choosing it asks them to sign in.
  */
 export default class HomeScene extends Phaser.Scene {
   constructor() {
@@ -84,6 +84,7 @@ export default class HomeScene extends Phaser.Scene {
       makeButton(this, "Play classic", SECONDARY, () => this.scene.start("RankedScene", { kind: "classic" })),
       makeButton(this, guest ? "Play ranked (sign in)" : "Play ranked", SECONDARY, ranked),
       makeButton(this, "Playground", SECONDARY, () => this.scene.start("PlaygroundScene")),
+      makeButton(this, "Tutorial", SECONDARY, () => this.scene.start("TutorialScene")),
     ];
     if (guest) for (const o of [this.buttons[3].rect, this.buttons[3].label]) o.setAlpha(0.5);
     this.blurb = this.add
