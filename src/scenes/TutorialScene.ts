@@ -1,6 +1,6 @@
 import * as Phaser from "phaser";
 import { GUIDE } from "../patterns";
-import { displayFont, fitHeight, fontFamily, PANEL_COLOR } from "../ui";
+import { displayFont, drawPattern, fitHeight, fontFamily, PANEL_COLOR } from "../ui";
 
 const PAD = 24;
 const GAP = 16;
@@ -11,8 +11,6 @@ const MAX_CONTENT_W = 1040;
 const DRAWING_H = 120;
 const MAX_TILE = 14;
 const CARD_PAD = 16;
-const EMPTY_COLOR = 0x15112a;
-const GRID_COLOR = 0x2b2448;
 
 type Card = { panel: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; about: Phaser.GameObjects.Text };
 type Section = { heading: Phaser.GameObjects.Text; about: Phaser.GameObjects.Text; cards: Card[] };
@@ -107,7 +105,7 @@ export default class TutorialScene extends Phaser.Scene {
         row.forEach((c, i) => {
           const cx = x + i * (cardW + GAP);
           c.panel.setPosition(cx, y).setSize(cardW, rowH);
-          this.drawPattern(s.patterns[start + i].cells, s.color, cx + CARD_PAD, y + CARD_PAD, cardW - CARD_PAD * 2);
+          drawPattern(this.drawings, s.patterns[start + i].cells, s.color, cx + CARD_PAD, y + CARD_PAD, cardW - CARD_PAD * 2, DRAWING_H, MAX_TILE);
           c.name.setPosition(cx + CARD_PAD, y + CARD_PAD + DRAWING_H + 12);
           c.about.setPosition(cx + CARD_PAD, c.name.y + c.name.height + 4);
         });
@@ -118,21 +116,5 @@ export default class TutorialScene extends Phaser.Scene {
 
     // the page scrolls when the guide is taller than the window
     fitHeight(this, y - 24 - GAP + PAD);
-  }
-
-  /** The pattern on a little board one tile bigger all round, centred in a w × DRAWING_H box. */
-  private drawPattern(cells: [number, number][], color: number, bx: number, by: number, w: number) {
-    const rows = Math.max(...cells.map(([r]) => r)) + 3;
-    const cols = Math.max(...cells.map(([, c]) => c)) + 3;
-    const tile = Math.min(MAX_TILE, Math.floor(w / cols), Math.floor(DRAWING_H / rows));
-    const ox = bx + (w - tile * cols) / 2;
-    const oy = by + (DRAWING_H - tile * rows) / 2;
-    const g = this.drawings;
-    g.fillStyle(EMPTY_COLOR).fillRect(ox, oy, tile * cols, tile * rows);
-    g.lineStyle(1, GRID_COLOR);
-    for (let c = 0; c <= cols; c++) g.lineBetween(ox + c * tile, oy, ox + c * tile, oy + rows * tile);
-    for (let r = 0; r <= rows; r++) g.lineBetween(ox, oy + r * tile, ox + cols * tile, oy + r * tile);
-    g.fillStyle(color);
-    for (const [r, c] of cells) g.fillRect(ox + (c + 1) * tile + 1, oy + (r + 1) * tile + 1, tile - 1, tile - 1);
   }
 }

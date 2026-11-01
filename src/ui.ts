@@ -14,7 +14,13 @@ export type Button = {
   // while loading, a spinner stands in for the label (see setButtonLoading)
   loading?: boolean;
   spinner?: Phaser.GameObjects.Graphics;
+  // the label's own font size, which layoutButton shrinks from when the label wouldn't fit
+  labelSize?: number;
 };
+
+// a label keeps at least this much room on each side, shrinking down to MIN_LABEL_SIZE to make it
+const LABEL_PAD = 10;
+const MIN_LABEL_SIZE = 12;
 
 export const SPINNER_SIZE = 16;
 // room a status line leaves in front of itself for its spinner
@@ -52,6 +58,24 @@ function setMinHeight(scene: Phaser.Scene, min: string) {
   document.querySelector("main")!.style.minHeight = min;
   // Phaser reads the game's new size on its next step; resizing right away would rerun the layout inside itself
   scene.scale.dirty = true;
+}
+
+const PATTERN_EMPTY = 0x15112a;
+const PATTERN_GRID = 0x2b2448;
+
+/** A pattern's cells on a little board one tile bigger all round, centred in the w × h box at (x, y). */
+export function drawPattern(g: Phaser.GameObjects.Graphics, cells: [number, number][], color: number, x: number, y: number, w: number, h: number, maxTile: number) {
+  const rows = Math.max(...cells.map(([r]) => r)) + 3;
+  const cols = Math.max(...cells.map(([, c]) => c)) + 3;
+  const tile = Math.min(maxTile, Math.floor(w / cols), Math.floor(h / rows));
+  const ox = x + (w - tile * cols) / 2;
+  const oy = y + (h - tile * rows) / 2;
+  g.fillStyle(PATTERN_EMPTY).fillRect(ox, oy, tile * cols, tile * rows);
+  g.lineStyle(1, PATTERN_GRID);
+  for (let c = 0; c <= cols; c++) g.lineBetween(ox + c * tile, oy, ox + c * tile, oy + rows * tile);
+  for (let r = 0; r <= rows; r++) g.lineBetween(ox, oy + r * tile, ox + cols * tile, oy + r * tile);
+  g.fillStyle(color);
+  for (const [r, c] of cells) g.fillRect(ox + (c + 1) * tile + 1, oy + (r + 1) * tile + 1, tile - 1, tile - 1);
 }
 
 /**
@@ -110,10 +134,15 @@ export function setButtonLoading(button: Button, loading: boolean) {
   label.setVisible(!loading && rect.visible);
 }
 
-export function layoutButton({ rect, label, spinner }: Button, x: number, y: number, w: number, h = BTN_H) {
+export function layoutButton(button: Button, x: number, y: number, w: number, h = BTN_H) {
+  const { rect, label, spinner } = button;
   rect.setPosition(x, y).setSize(w, h);
   // setSize doesn't update the click area, so keep it in sync
   (rect.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, w, h);
+  // a label too wide for the button (a long one, or a narrow screen) shrinks until it fits
+  let size = (button.labelSize ??= parseFloat(String(label.style.fontSize)));
+  label.setFontSize(size);
+  while (label.width > w - LABEL_PAD * 2 && size > MIN_LABEL_SIZE) label.setFontSize(--size);
   label.setPosition(x + w / 2, y + h / 2);
   spinner?.setPosition(x + w / 2, y + h / 2);
 }

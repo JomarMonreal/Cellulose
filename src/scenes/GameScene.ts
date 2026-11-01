@@ -5,11 +5,13 @@ import type Cell from "../Cell";
 import { type Mode, modeName } from "../modes";
 import Online from "../net/Online";
 import type { GameAction, GameState, LobbyState, RankedResult } from "../net/protocol";
+import { GUIDE } from "../patterns";
 import Player, { PALETTE } from "../Player";
 import {
   BTN_H,
   type Button,
   displayFont,
+  drawPattern,
   fontFamily,
   keepWheel,
   layoutButton,
@@ -67,6 +69,16 @@ const PLAYER_SWATCH = 24;
 // the square Rules and Quit buttons in the sidebar's top corner
 const ICON_BTN = 40;
 const ICON_GAP = 8;
+// the bottom of the sidebar shows one of each basic kind of pattern, from the tutorial's guide
+const SIDEBAR_PATTERNS = [
+  ["Still life", "Block"],
+  ["Oscillator", "Blinker"],
+  ["Spaceship", "Glider"],
+  ["Methuselah", "R-pentomino"],
+] as const;
+const PATTERN_DRAWING_H = 56;
+// a pattern's drawing, then its name and kind
+const PATTERN_ITEM_H = PATTERN_DRAWING_H + 50;
 // the results panel draws over everything else
 const RESULTS_DEPTH = 10;
 // how long a notice (a refused request, a click that can't place) replaces the phase text
@@ -155,6 +167,23 @@ export default class GameScene extends Phaser.Scene {
   private playerCounts!: Phaser.GameObjects.Text[];
   private placeLabel!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
+  private patternsLabel!: Phaser.GameObjects.Text;
+  private patternNames!: Phaser.GameObjects.Text[];
+  private patternKinds!: Phaser.GameObjects.Text[];
+  private patternDrawings!: Phaser.GameObjects.Graphics;
+  private sidebarPatterns!: { cells: [number, number][]; color: number }[];
+  // the sidebar's contents have their own camera, clipped to the panel, so they scroll inside it
+  private sidebarCam!: Phaser.Cameras.Scene2D.Camera;
+  // overlays (rules, results) have a camera on top of everything, so their shade covers the sidebar too
+  private overlayCam!: Phaser.Cameras.Scene2D.Camera;
+  private sidebarView!: Phaser.Geom.Rectangle;
+  private sidebarScroll!: number;
+  private sidebarMaxScroll!: number;
+  // the pointer went down in the sidebar, so dragging scrolls it
+  private sidebarDrag!: boolean;
+  private scrollbar!: Phaser.GameObjects.Graphics;
+  // where the zoom field sits in the sidebar before scrolling
+  private zoomY!: number;
   // the sidebar is beside the board (wide) or below it, compacted (narrow)
   private wide!: boolean;
   // the how-to-play overlay, while it's open
@@ -232,6 +261,11 @@ export default class GameScene extends Phaser.Scene {
     this.panY = 0;
     this.pressed = false;
     this.panning = false;
+    this.sidebarView = new Phaser.Geom.Rectangle();
+    this.sidebarScroll = 0;
+    this.sidebarMaxScroll = 0;
+    this.sidebarDrag = false;
+    this.zoomY = 0;
   }
 
   create() {
@@ -276,13 +310,54 @@ export default class GameScene extends Phaser.Scene {
     }
     const hint = "Click your shaded land to place a cell, or one of yours to take it back. Drag to pan, scroll to zoom.\nSpace: ready · ?: rules";
     this.hint = this.add.text(0, 0, hint, { fontFamily: font, fontSize: "13px", color: "#d4ccff", lineSpacing: 3 });
+    this.patternsLabel = this.add.text(0, 0, "Patterns", { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
+    const guide = GUIDE.flatMap((s) => s.patterns.map((p) => ({ ...p, color: s.color })));
+    const patterns = SIDEBAR_PATTERNS.map(([kind, name]) => ({ kind, ...guide.find((p) => p.name === name)! }));
+    this.patternNames = patterns.map((p) => this.add.text(0, 0, p.name, { fontFamily: display, fontSize: "14px", color: "#f8f5ff" }));
+    this.patternKinds = patterns.map((p) =>
+      this.add.text(0, 0, p.kind, { fontFamily: font, fontSize: "13px", fontStyle: "bold", color: `#${p.color.toString(16).padStart(6, "0")}` }),
+    );
+    this.patternDrawings = this.add.graphics();
+    this.sidebarPatterns = patterns;
+    this.scrollbar = this.add.graphics();
+
+    // everything below the sidebar's title bar moves with the sidebar's scroll; the main camera skips it
+    const sidebarObjects: Phaser.GameObjects.GameObject[] = [
+      this.title,
+      this.quitIcon,
+      this.generationText,
+      this.phaseText,
+      this.zoomLabel,
+      this.placeLabel,
+      ...this.playerSwatches,
+      ...this.playerTexts,
+      ...this.playerCounts,
+      this.hint,
+      this.patternsLabel,
+      ...this.patternNames,
+      ...this.patternKinds,
+      this.patternDrawings,
+      ...[this.rulesButton, this.quitButton, this.playButton, this.stopButton, this.zoomOutButton, this.zoomInButton].flatMap((b) => [b.rect, b.label]),
+    ];
+    const others = this.children.list.filter((o) => !sidebarObjects.includes(o));
+    this.cameras.main.ignore(sidebarObjects);
+    this.sidebarCam = this.cameras.add(0, 0, 1, 1);
+    this.sidebarCam.ignore(others);
+    this.overlayCam = this.cameras.add(0, 0, 1, 1);
+    // the zoom field is HTML: every camera that skips it hides it, so only the last, unscrolled one shows it,
+    // and scrollSidebar moves it with the sidebar's contents
+    this.cameras.main.ignore(this.zoomInput);
+    this.overlayCam.ignore(this.children.list.filter((o) => o !== this.zoomInput));
 
     // drag pans the board; a click (press and release without dragging) places or takes back a cell
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       this.pressed = this.phase !== "over" && !this.rules && this.view.contains(p.x, p.y);
       this.panning = false;
+      // dragging in the sidebar scrolls it (handy on touch screens)
+      this.sidebarDrag = !this.rules && !this.results && this.sidebarView.contains(p.x, p.y);
     });
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      if (this.sidebarDrag && p.isDown) return this.scrollSidebar(p.prevPosition.y - p.y);
       if (!this.pressed || !p.isDown) return this.drawHover();
       if (!this.panning && Phaser.Math.Distance.Between(p.downX, p.downY, p.x, p.y) > DRAG_THRESHOLD) {
         this.panning = true;
@@ -301,15 +376,18 @@ export default class GameScene extends Phaser.Scene {
       }
       this.pressed = false;
       this.panning = false;
+      this.sidebarDrag = false;
       this.drawHover();
     };
     this.input.on("pointerup", (p: Phaser.Input.Pointer) => release(p, true));
     this.input.on("pointerupoutside", (p: Phaser.Input.Pointer) => release(p, false));
     this.input.on(Phaser.Input.Events.GAME_OUT, () => this.hoverGraphics.clear());
 
-    // scroll to zoom, keeping the point under the cursor fixed
+    // scroll over the board to zoom, keeping the point under the cursor fixed; over the sidebar, to scroll it
     this.input.on("wheel", (p: Phaser.Input.Pointer, _objs: unknown, _dx: number, dy: number) => {
-      if (this.phase === "over" || this.rules || !this.view.contains(p.x, p.y)) return;
+      if (this.rules || this.results) return;
+      if (this.sidebarView.contains(p.x, p.y)) return this.scrollSidebar(dy);
+      if (this.phase === "over" || !this.view.contains(p.x, p.y)) return;
       this.zoomAt(this.zoom * Math.exp(-dy * ZOOM_SPEED), p.x, p.y);
     });
     // a game always fits the window, so the page has nothing to scroll: the wheel is all the game's
@@ -569,6 +647,8 @@ export default class GameScene extends Phaser.Scene {
     if (this.online) {
       this.playButton.label.setText("Ready");
       setButtonLoading(this.playButton, this.placing && this.onlineReady);
+      // the spinner is made on first use; it belongs to the sidebar's camera
+      if (this.playButton.spinner) for (const cam of [this.cameras.main, this.overlayCam]) cam.ignore(this.playButton.spinner);
     } else this.playButton.label.setText(!this.paused && this.placing ? "Ready" : "Play");
     // dim whichever button doesn't apply right now
     this.playButton.rect.setAlpha(playActive ? 1 : 0.4);
@@ -630,6 +710,7 @@ export default class GameScene extends Phaser.Scene {
     for (const o of [results.shade, results.panel, results.title, results.standings]) o.setDepth(RESULTS_DEPTH);
     setButtonDepth(results.button, RESULTS_DEPTH);
     this.results = results;
+    this.showOnTop([results.shade, results.panel, results.title, results.standings, results.button.rect, results.button.label]);
     this.syncZoomInput();
     this.showStandings();
   }
@@ -776,6 +857,7 @@ export default class GameScene extends Phaser.Scene {
     for (const o of [rules.shade, rules.panel, rules.title, rules.body]) o.setDepth(RESULTS_DEPTH);
     setButtonDepth(rules.button, RESULTS_DEPTH);
     this.rules = rules;
+    this.showOnTop([rules.shade, rules.panel, rules.title, rules.body, rules.button.rect, rules.button.label]);
     this.syncZoomInput();
     this.drawHover();
     this.layoutRules(this.scale.gameSize);
@@ -809,9 +891,36 @@ export default class GameScene extends Phaser.Scene {
     layoutButton(r.button, px + 32, py + ph - 32 - BTN_H, pw - 64);
   }
 
-  /** The zoom field is HTML, so it would sit on top of an overlay; narrow screens just use - and +. */
+  /**
+   * The zoom field is HTML, so it would sit on top of an overlay, and the sidebar's camera can't clip it: it hides
+   * once scrolled even partly out of view. Narrow screens just use - and +.
+   */
   private syncZoomInput() {
-    this.zoomInput.setVisible(this.wide && !this.rules && !this.results);
+    const top = this.zoomInput.y;
+    const inView = top >= this.sidebarView.y && top + BTN_H <= this.sidebarView.bottom;
+    this.zoomInput.setVisible(this.wide && !this.rules && !this.results && inView);
+  }
+
+  /** Overlay objects show on the top camera only, above the board and the sidebar's contents. */
+  private showOnTop(objects: Phaser.GameObjects.GameObject[]) {
+    this.cameras.main.ignore(objects);
+    this.sidebarCam.ignore(objects);
+  }
+
+  /** Scroll the sidebar's contents by dy, within what they have to show. */
+  private scrollSidebar(dy: number) {
+    this.sidebarScroll = Phaser.Math.Clamp(this.sidebarScroll + dy, 0, this.sidebarMaxScroll);
+    const { x, y, width: w, height: h } = this.sidebarView;
+    this.sidebarCam.setScroll(x, y + this.sidebarScroll);
+    this.zoomInput.y = this.zoomY - this.sidebarScroll;
+    // a thin bar along the panel's right edge, while there's more than fits
+    const g = this.scrollbar.clear();
+    if (this.sidebarMaxScroll > 0) {
+      const track = h - 16;
+      const bar = Math.max(24, (track * h) / (h + this.sidebarMaxScroll));
+      g.fillStyle(0xf8f5ff, 0.25).fillRect(x + w - 7, y + 8 + ((track - bar) * this.sidebarScroll) / this.sidebarMaxScroll, 3, bar);
+    }
+    this.syncZoomInput();
   }
 
   /** Let an AI place its next cell. False if it has nothing it can place. */
@@ -997,6 +1106,7 @@ export default class GameScene extends Phaser.Scene {
       sy = PAD;
       sh = height - PAD * 2;
     } else {
+      // the sidebar is tall enough for everything down to the players; the patterns scroll into view
       sh = extra + playersY + playersH + 8;
       size = Math.max(120, Math.min(width - PAD * 2, height - sh - PAD * 3));
       bx = (width - size) / 2;
@@ -1034,6 +1144,7 @@ export default class GameScene extends Phaser.Scene {
       const inputW = sw - 40 - (BTN_H + gap) * 2;
       layoutButton(this.zoomOutButton, sx + 20, zy, BTN_H);
       this.zoomInput.setPosition(sx + 20 + BTN_H + gap, zy);
+      this.zoomY = zy;
       (this.zoomInput.node as HTMLInputElement).style.width = `${inputW}px`;
       layoutButton(this.zoomInButton, sx + sw - 20 - BTN_H, zy, BTN_H);
     } else {
@@ -1059,6 +1170,28 @@ export default class GameScene extends Phaser.Scene {
 
     // the sidebar has room for a reminder of the controls only beside the board
     this.hint.setVisible(wide).setWordWrapWidth(sw - 40).setPosition(sx + 20, top + playersY + playersH + 12);
+
+    // one of each basic kind of pattern, two to a row, under the hint (or the players, when narrow)
+    let y = wide ? this.hint.y + this.hint.height + 24 : top + playersY + playersH + 8;
+    this.patternsLabel.setPosition(sx + 20, y);
+    y += 26;
+    const itemW = (sw - 40 - gap) / 2;
+    this.patternDrawings.clear();
+    this.sidebarPatterns.forEach((p, i) => {
+      const px = sx + 20 + (i % 2) * (itemW + gap);
+      const py = y + Math.floor(i / 2) * (PATTERN_ITEM_H + gap);
+      drawPattern(this.patternDrawings, p.cells, p.color, px, py, itemW, PATTERN_DRAWING_H, 10);
+      this.patternNames[i].setPosition(px, py + PATTERN_DRAWING_H + 8);
+      this.patternKinds[i].setPosition(px, py + PATTERN_DRAWING_H + 28);
+    });
+    y += Math.ceil(this.sidebarPatterns.length / 2) * (PATTERN_ITEM_H + gap) - gap;
+    // the panel keeps its size; contents taller than it scroll inside it
+    this.sidebarView.setTo(sx, sy, sw, sh);
+    this.sidebarMaxScroll = Math.max(0, y + 20 - sy - sh);
+    this.sidebarCam.setViewport(sx, sy, sw, sh);
+    this.overlayCam.setViewport(0, 0, width, height);
+    this.scrollSidebar(0);
+
     if (this.results) this.layoutResults({ width, height });
     if (this.rules) this.layoutRules({ width, height });
   }
