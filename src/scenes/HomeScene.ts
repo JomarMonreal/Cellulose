@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import Online from "../net/Online";
 import { PALETTE } from "../Player";
-import { BTN_H, type Button, fontFamily, layoutButton, makeButton, PRIMARY, SECONDARY } from "../ui";
+import { BTN_H, type Button, displayFont, fitHeight, fontFamily, layoutButton, makeButton, PRIMARY, SECONDARY } from "../ui";
 
 const PAD = 24;
 // the classic glider, as [row, col] in a 3x3 box
@@ -17,14 +17,15 @@ const BUTTON_GAP = 12;
 
 /**
  * Title screen: the game's name, a row of gliders in the player colours, and play with bots, with friends,
- * classic (matchmade, unrated) or ranked. Guests see ranked dimmed; choosing it asks them to sign in.
+ * classic (matchmade, unrated) or ranked, or the playground. Guests see ranked dimmed; choosing it asks them to sign in.
  */
 export default class HomeScene extends Phaser.Scene {
   constructor() {
     super("HomeScene");
   }
 
-  private title!: Phaser.GameObjects.Text;
+  // "Cellulose" in the logo's colours: Cell, u, lose
+  private title!: Phaser.GameObjects.Text[];
   private subtitle!: Phaser.GameObjects.Text;
   private gliders!: Phaser.GameObjects.Graphics;
   private buttons!: Button[];
@@ -38,6 +39,7 @@ export default class HomeScene extends Phaser.Scene {
     if (!online.player) return this.scene.start("AuthScene");
     const guest = !online.profile;
     const font = fontFamily();
+    const display = displayFont();
     this.account = this.add
       .text(0, 0, guest ? `Playing as ${online.guest} (guest)` : `Signed in as ${online.player}`, {
         fontFamily: font,
@@ -46,7 +48,7 @@ export default class HomeScene extends Phaser.Scene {
       })
       .setOrigin(0, 0);
     this.logout = this.add
-      .text(0, 0, guest ? "Sign in" : "Log out", { fontFamily: font, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
+      .text(0, 0, guest ? "Sign in" : "Log out", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true })
       .on("pointerover", () => this.logout.setColor("#ffe03d"))
@@ -67,9 +69,13 @@ export default class HomeScene extends Phaser.Scene {
       this.scene.start("AuthScene", { message: "Sign in to play ranked.", then: "RankedScene" });
     };
 
-    this.title = this.add.text(0, 0, "Cellulose", { fontFamily: font, fontSize: "72px", fontStyle: "bold", color: "#ffe03d" }).setOrigin(0.5, 0);
+    this.title = [
+      ["Cell", "#ffe03d"],
+      ["u", "#f8f5ff"],
+      ["lose", "#8b3bdb"],
+    ].map(([text, color]) => this.add.text(0, 0, text, { fontFamily: display, fontSize: "72px", fontStyle: "bold", color }));
     this.subtitle = this.add
-      .text(0, 0, "Conway's Competitive Game of Life", { fontFamily: font, fontSize: "20px", color: "#d4ccff", align: "center" })
+      .text(0, 0, "Conway's Competitive Game of Life", { fontFamily: display, fontSize: "20px", color: "#d4ccff", align: "center" })
       .setOrigin(0.5, 0);
     this.gliders = this.add.graphics();
     this.buttons = [
@@ -77,6 +83,7 @@ export default class HomeScene extends Phaser.Scene {
       makeButton(this, "Play with friends", SECONDARY, () => this.scene.start("OnlineLobbyScene")),
       makeButton(this, "Play classic", SECONDARY, () => this.scene.start("RankedScene", { kind: "classic" })),
       makeButton(this, guest ? "Play ranked (sign in)" : "Play ranked", SECONDARY, ranked),
+      makeButton(this, "Playground", SECONDARY, () => this.scene.start("PlaygroundScene")),
     ];
     if (guest) for (const o of [this.buttons[3].rect, this.buttons[3].label]) o.setAlpha(0.5);
     this.blurb = this.add
@@ -97,7 +104,8 @@ export default class HomeScene extends Phaser.Scene {
   /** Everything stacked in a centred column; the title shrinks on narrow screens. */
   private layout({ width, height }: Phaser.Structs.Size) {
     const colW = Math.min(480, width - PAD * 2);
-    this.title.setFontSize(Phaser.Math.Clamp(Math.round(width / 9), 40, 72));
+    for (const t of this.title) t.setFontSize(Phaser.Math.Clamp(Math.round(width / 9), 40, 72));
+    const titleH = this.title[0].height;
     this.subtitle.setWordWrapWidth(colW);
     this.blurb.setWordWrapWidth(colW);
 
@@ -105,16 +113,23 @@ export default class HomeScene extends Phaser.Scene {
     const glidersH = cell * 3;
     const glidersW = PALETTE.length * cell * 3 + (PALETTE.length - 1) * GLIDER_GAP;
     const buttonsH = this.buttons.length * (BTN_H + BUTTON_GAP) - BUTTON_GAP;
-    const totalH = this.title.height + 8 + this.subtitle.height + 40 + glidersH + 48 + buttonsH + 32 + this.blurb.height;
+    const totalH = titleH + 8 + this.subtitle.height + 40 + glidersH + 48 + buttonsH + 32 + this.blurb.height;
 
     this.account.setPosition(PAD, PAD);
     this.logout.setPosition(width - PAD, PAD);
     const top = PAD + this.account.height + 16;
+    // a window too short for the whole column makes the page scroll
+    fitHeight(this, top + totalH + PAD);
 
     const cx = width / 2;
     let y = Math.max(top, (height - totalH) / 2);
-    this.title.setPosition(cx, y);
-    y += this.title.height + 8;
+    // the three parts side by side, centred together
+    let tx = cx - this.title.reduce((w, t) => w + t.width, 0) / 2;
+    for (const t of this.title) {
+      t.setPosition(tx, y);
+      tx += t.width;
+    }
+    y += titleH + 8;
     this.subtitle.setPosition(cx, y);
     y += this.subtitle.height + 40;
 
@@ -126,7 +141,8 @@ export default class HomeScene extends Phaser.Scene {
     });
     y += glidersH + 48;
 
-    const btnW = Math.min(260, colW);
+    // room around the longest label, "Play ranked (sign in)", in the display font
+    const btnW = Math.min(300, colW);
     this.buttons.forEach((b, i) => layoutButton(b, cx - btnW / 2, y + i * (BTN_H + BUTTON_GAP), btnW));
     y += buttonsH + 32;
     this.blurb.setPosition(cx, y);

@@ -3,6 +3,8 @@ import Online from "../net/Online";
 import {
   BTN_H,
   type Button,
+  displayFont,
+  fitHeight,
   fontFamily,
   layoutButton,
   makeButton,
@@ -75,11 +77,12 @@ export default class AuthScene extends Phaser.Scene {
     if (this.online.player) return this.next();
 
     const font = fontFamily();
-    const labelStyle = { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
+    const display = displayFont();
+    const labelStyle = { fontFamily: display, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
 
     this.logo = this.add.image(0, 0, "logo").setOrigin(0.5, 0);
     this.panel = this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0);
-    this.title = this.add.text(0, 0, "Sign in to play", { fontFamily: font, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
+    this.title = this.add.text(0, 0, "Sign in to play", { fontFamily: display, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
     this.status = this.add.text(0, 0, "", { fontFamily: font, fontSize: "14px", color: "#d4ccff" });
     this.statusSpinner = makeSpinner(this);
     this.errorText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "15px", fontStyle: "bold", color: "#ff4d5e" });
@@ -162,6 +165,8 @@ export default class AuthScene extends Phaser.Scene {
     const errorH = this.error ? this.errorText.height + 16 : 0;
 
     const ph = 32 + this.title.height + 8 + this.status.height + 24 + (24 + BTN_H + 24) * 2 + BTN_H + GAP + BTN_H + errorH + 32;
+    // the logo only shows if there's room; the panel always has to fit
+    fitHeight(this, ph + PAD * 2);
     const logoH = Phaser.Math.Clamp(Math.min(height - ph - PAD * 2 - LOGO_GAP, width * 0.4), 0, 160);
     this.logo.setVisible(logoH >= 48).setDisplaySize(logoH * (this.logo.width / this.logo.height), logoH);
     const totalH = ph + (this.logo.visible ? logoH + LOGO_GAP : 0);

@@ -3,6 +3,17 @@
   --color-lilac: #9a8ae0;
   --color-yellow: #ffe03d;
   --color-cream: #f8f5ff;
+  /* display: titles, buttons and labels; text: anything read as a sentence. The canvas reads them through ui.ts */
+  --font-display: "Arco", ui-sans-serif, system-ui, sans-serif;
+  --font-text: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* the display typeface (public/ARCO.ttf). It has one weight; claiming every weight stops browsers faking a bold */
+@font-face {
+  font-family: "Arco";
+  src: url("/ARCO.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
 }
 
 * {
@@ -14,7 +25,7 @@ body {
   margin: 0;
   background: var(--color-ink);
   color: var(--color-cream);
-  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-text);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -53,6 +64,7 @@ h1 {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-family: var(--font-display);
   font-size: 1.125rem;
   font-weight: 800;
   letter-spacing: -0.025em;

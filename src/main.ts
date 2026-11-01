@@ -10,9 +10,8 @@ wakeServer();
 const parent = document.getElementById("game")!;
 startBackground(document.getElementById("bg") as HTMLCanvasElement);
 
-// scenes read the body font when they build their text, so wait for it first
-document.fonts
-  .load('16px "Bricolage Grotesque"')
+// scenes read the fonts when they build their text, so wait for both first
+Promise.all([document.fonts.load('16px "Bricolage Grotesque"'), document.fonts.load('16px "Arco"')])
   .catch(() => {})
   .then(() => {
     const game = new Phaser.Game(createGameConfig(parent));

@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import { MODES } from "../modes";
 import { PALETTE } from "../Player";
-import { BTN_H, type Button, fontFamily, layoutButton, makeButton, PANEL_COLOR, PRIMARY, SECONDARY, setButtonStyle } from "../ui";
+import { BTN_H, type Button, displayFont, fitHeight, fontFamily, layoutButton, makeButton, PANEL_COLOR, PRIMARY, SECONDARY, setButtonStyle } from "../ui";
 import { FINAL_GENERATION, type GameSettings } from "./GameScene";
 
 const PAD = 24;
@@ -35,10 +35,11 @@ export default class LobbyScene extends Phaser.Scene {
 
   create() {
     const font = fontFamily();
-    const labelStyle = { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
+    const display = displayFont();
+    const labelStyle = { fontFamily: display, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
 
     this.panel = this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0);
-    this.title = this.add.text(0, 0, "Play with bots", { fontFamily: font, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
+    this.title = this.add.text(0, 0, "Play with bots", { fontFamily: display, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
     this.modeLabel = this.add.text(0, 0, "Mode", labelStyle);
     this.modeButtons = MODES.map((m) =>
       makeButton(this, m.name, SECONDARY, () => {
@@ -81,7 +82,7 @@ export default class LobbyScene extends Phaser.Scene {
     const rivals = PALETTE.filter((_, i) => i !== color)
       .slice(0, opponents)
       .map((p) => `${p.name} AI`);
-    const rule = mode === "ctf" ? MODES.find((m) => m.id === "ctf")!.rule : `${FINAL_GENERATION} generations. Most land at the end wins.`;
+    const rule = mode === "ctf" ? MODES.find((m) => m.id === "ctf")!.rule : `${FINAL_GENERATION.strongest500} generations. Most land at the end wins.`;
     this.matchup.setText(`You vs ${rivals.join(", ")}\n${rule}`);
   }
 
@@ -91,6 +92,7 @@ export default class LobbyScene extends Phaser.Scene {
     const inner = pw - 64;
     this.matchup.setWordWrapWidth(inner);
     const ph = 32 + this.title.height + 28 + (24 + BTN_H + 28) * 3 - 4 + this.matchup.height + 32 + BTN_H + 32;
+    fitHeight(this, ph + PAD * 2);
     const px = (width - pw) / 2;
     const py = Math.max(PAD, (height - ph) / 2);
     const x = px + 32;

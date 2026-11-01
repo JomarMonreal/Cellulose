@@ -5,6 +5,8 @@ import { PALETTE } from "../Player";
 import {
   BTN_H,
   type Button,
+  displayFont,
+  fitHeight,
   fontFamily,
   layoutButton,
   makeButton,
@@ -85,10 +87,11 @@ export default class OnlineLobbyScene extends Phaser.Scene {
 
   create() {
     const font = fontFamily();
-    const labelStyle = { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
+    const display = displayFont();
+    const labelStyle = { fontFamily: display, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
 
     this.panel = this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0);
-    this.title = this.add.text(0, 0, "", { fontFamily: font, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
+    this.title = this.add.text(0, 0, "", { fontFamily: display, fontSize: "32px", fontStyle: "bold", color: "#f8f5ff" });
     this.status = this.add.text(0, 0, "", { fontFamily: font, fontSize: "14px", color: "#d4ccff" });
     this.statusSpinner = makeSpinner(this);
     this.errorText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "15px", fontStyle: "bold", color: "#ff4d5e" });
@@ -286,6 +289,7 @@ export default class OnlineLobbyScene extends Phaser.Scene {
       ? BTN_H + 24 + 24 + lobby.members.length * MEMBER_ROW_H + 16 + 24 + (modesShown ? BTN_H + 24 : 8) + colors + 24 + (botsShown ? BTN_H + 24 : 0)
       : 24 + BTN_H + 24 + colors + BTN_H + 28 + 24 + BTN_H + 24;
     const ph = head + body + errorH + BTN_H + 32;
+    fitHeight(this, ph + PAD * 2);
     const px = (width - pw) / 2;
     const py = Math.max(PAD, (height - ph) / 2);
     const x = px + 32;

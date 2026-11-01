@@ -5,6 +5,8 @@ import type { MatchKind } from "../net/protocol";
 import {
   BTN_H,
   type Button,
+  displayFont,
+  fitHeight,
   fontFamily,
   layoutButton,
   makeButton,
@@ -72,11 +74,12 @@ export default class RankedScene extends Phaser.Scene {
   create() {
     if (!this.allowed) return this.scene.start("AuthScene", this.kind === "ranked" ? { message: "Sign in to play ranked.", then: "RankedScene" } : undefined);
     const font = fontFamily();
-    const labelStyle = { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
+    const display = displayFont();
+    const labelStyle = { fontFamily: display, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" };
 
     this.panel = this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0);
     this.title = this.add.text(0, 0, this.kind === "ranked" ? "Ranked" : "Classic", {
-      fontFamily: font,
+      fontFamily: display,
       fontSize: "32px",
       fontStyle: "bold",
       color: "#f8f5ff",
@@ -87,7 +90,7 @@ export default class RankedScene extends Phaser.Scene {
     this.backButton = makeButton(this, "Back", SECONDARY, () => this.scene.start("HomeScene"));
 
     this.logoutText = this.add
-      .text(0, 0, "Log out", { fontFamily: font, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
+      .text(0, 0, "Log out", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true })
       .on("pointerover", () => this.logoutText.setColor("#ffe03d"))
@@ -218,6 +221,7 @@ export default class RankedScene extends Phaser.Scene {
     const ratingsH = this.ratings.visible ? this.ratings.height + 24 : 0;
     const body = ratingsH + 24 + BTN_H + 24 + BTN_H + 12 + this.queueText.height + 24 + (queued ? BTN_H + 24 : 0);
     const ph = head + body + errorH + BTN_H + 32;
+    fitHeight(this, ph + PAD * 2);
     const px = (width - pw) / 2;
     const py = Math.max(PAD, (height - ph) / 2);
     const x = px + 32;

@@ -9,7 +9,9 @@ import Player, { PALETTE } from "../Player";
 import {
   BTN_H,
   type Button,
+  displayFont,
   fontFamily,
+  keepWheel,
   layoutButton,
   makeButton,
   PANEL_COLOR,
@@ -21,21 +23,22 @@ import {
 } from "../ui";
 
 const PAD = 24;
-const GENERATION_MS = 120;
-const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 10;
+// the exported pace, zoom, pan and frame settings are shared with PlaygroundScene, so its board feels the same
+export const GENERATION_MS = 120;
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 10;
 // zoom factor per wheel pixel; one mouse notch (~100px) is about 10%
-const ZOOM_SPEED = 0.001;
+export const ZOOM_SPEED = 0.001;
 // zoom factor per click of the sidebar's - / + buttons
-const ZOOM_STEP = 1.25;
+export const ZOOM_STEP = 1.25;
 // pixels the pointer must move before a press becomes a pan instead of a click
-const DRAG_THRESHOLD = 4;
-const FRAME_COLOR = 0xfff2a1;
-const FRAME_WIDTH = 10;
+export const DRAG_THRESHOLD = 4;
+export const FRAME_COLOR = 0xfff2a1;
+export const FRAME_WIDTH = 10;
 // empty space outside the frame, visible at the starting zoom and when panned to an edge
 const MARGIN = 10;
 // distance from the view's edge to the board at the starting zoom
-const INSET = FRAME_WIDTH + MARGIN;
+export const INSET = FRAME_WIDTH + MARGIN;
 
 const START_RESOURCES = 10;
 // each round every player gets ROUND_RESOURCES cells, plus floor(cbrt(territory gained since last round))
@@ -45,10 +48,13 @@ const START_TERRITORY = 7;
 // capture the flag: each flag sits in the middle of its owner's starting corner
 const FLAG_OFFSET = Math.floor(START_TERRITORY / 2);
 const FLAG_OUTLINE = 0x120e22;
+const FLAG_TILE_COLOR = 0xf8f5ff;
+// a flag is drawn this many tiles tall, its pole standing on its own tile
+const FLAG_SIZE = 2.5;
 // generations between placement phases (and resource grants)
 const GRANT_EVERY = 50;
-// the game ends after this generation; the player with the most land wins
-export const FINAL_GENERATION = 500;
+// the game ends after this generation, per mode; the player with the most land wins (capture the flag runs longer)
+export const FINAL_GENERATION: Record<Mode, number> = { strongest500: 500, ctf: 1000 };
 const SETUP_MS = 30_000;
 const PLACE_MS = 30_000;
 // an AI places one cell every AI_PLACE_MIN_MS..AI_PLACE_MAX_MS during a placement phase
@@ -56,17 +62,21 @@ const AI_PLACE_MIN_MS = 150;
 const AI_PLACE_MAX_MS = 500;
 // corners clockwise from the human's top-left: one opponent sits across the board, two take the corners beside you
 const AI_CORNERS: Record<number, number[]> = { 1: [2], 2: [1, 3], 3: [1, 2, 3] };
-const PLAYER_ROW_H = 46;
+const PLAYER_ROW_H = 40;
+const PLAYER_SWATCH = 24;
+// the square Rules and Quit buttons in the sidebar's top corner
+const ICON_BTN = 40;
+const ICON_GAP = 8;
 // the results panel draws over everything else
 const RESULTS_DEPTH = 10;
 // how long a notice (a refused request, a click that can't place) replaces the phase text
-const NOTICE_MS = 2_000;
+export const NOTICE_MS = 2_000;
 // the placement timer turns red for its last few seconds
 const URGENT_SECS = 5;
 // the rules overlay opens by itself on your first game, then only when asked
 const RULES_SEEN_KEY = "cellulose:seenRules";
-const HOVER_PLACE_ALPHA = 0.55;
-const REMOVE_COLOR = 0xff4d5e;
+export const HOVER_PLACE_ALPHA = 0.55;
+export const REMOVE_COLOR = 0xff4d5e;
 
 /** setup: the opening placement window; placing: the window every GRANT_EVERY generations; running: the simulation; over: past FINAL_GENERATION. */
 type Phase = "setup" | "placing" | "running" | "over";
@@ -126,8 +136,10 @@ export default class GameScene extends Phaser.Scene {
   private title!: Phaser.GameObjects.Text;
   // the title's height on one line, to tell how much it grows when it wraps
   private titleLineH!: number;
-  private quitText!: Phaser.GameObjects.Text;
-  private rulesText!: Phaser.GameObjects.Text;
+  private quitButton!: Button;
+  // the × drawn over the Quit button
+  private quitIcon!: Phaser.GameObjects.Graphics;
+  private rulesButton!: Button;
   private generationText!: Phaser.GameObjects.Text;
   private phaseText!: Phaser.GameObjects.Text;
   private playButton!: Button;
@@ -139,6 +151,9 @@ export default class GameScene extends Phaser.Scene {
   private zoomInput!: Phaser.GameObjects.DOMElement;
   private playerSwatches!: Phaser.GameObjects.Rectangle[];
   private playerTexts!: Phaser.GameObjects.Text[];
+  // how many cells each player has left to place, big beside their name
+  private playerCounts!: Phaser.GameObjects.Text[];
+  private placeLabel!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
   // the sidebar is beside the board (wide) or below it, compacted (narrow)
   private wide!: boolean;
@@ -198,6 +213,7 @@ export default class GameScene extends Phaser.Scene {
     this.noticeLeft = 0;
     this.playerSwatches = [];
     this.playerTexts = [];
+    this.playerCounts = [];
     this.results = undefined;
     this.rules = undefined;
     this.rulesResume = false;
@@ -220,6 +236,7 @@ export default class GameScene extends Phaser.Scene {
 
   create() {
     const font = fontFamily();
+    const display = displayFont();
     const state = this.online?.state;
     // nothing to show without the server's state or a seat in it (e.g. the room went away)
     if (this.online && (!state || !state.players[this.seat])) {
@@ -236,35 +253,26 @@ export default class GameScene extends Phaser.Scene {
     else this.createPlayers();
 
     this.sidebar = this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0);
-    this.title = this.add.text(0, 0, modeName(this.mode), { fontFamily: font, fontSize: "24px", fontStyle: "bold", color: "#f8f5ff" });
+    this.title = this.add.text(0, 0, modeName(this.mode), { fontFamily: display, fontSize: "24px", fontStyle: "bold", color: "#f8f5ff" });
     this.titleLineH = this.title.height;
-    this.quitText = this.add
-      .text(0, 0, "Quit", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => this.quitText.setColor("#ffe03d"))
-      .on("pointerout", () => this.quitText.setColor("#d4ccff"))
-      .on("pointerdown", () => this.quit());
-    this.rulesText = this.add
-      .text(0, 0, "Rules", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#d4ccff" })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => this.rulesText.setColor("#ffe03d"))
-      .on("pointerout", () => this.rulesText.setColor("#d4ccff"))
-      .on("pointerdown", () => this.openRules());
+    this.rulesButton = makeButton(this, "?", SECONDARY, () => this.openRules());
+    this.quitButton = makeButton(this, "", SECONDARY, () => this.quit());
+    this.quitIcon = this.add.graphics();
     this.generationText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", color: "#d4ccff" });
     this.phaseText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#ffe03d" });
     this.playButton = makeButton(this, "Play", PRIMARY, () => this.play());
     this.stopButton = makeButton(this, "Stop", SECONDARY, () => this.setPaused(true));
 
-    this.zoomLabel = this.add.text(0, 0, "Zoom", { fontFamily: font, fontSize: "16px", color: "#d4ccff" });
+    this.zoomLabel = this.add.text(0, 0, "Zoom", { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
     this.zoomOutButton = makeButton(this, "−", SECONDARY, () => this.zoomAtCenter(this.zoom / ZOOM_STEP));
     this.zoomInButton = makeButton(this, "+", SECONDARY, () => this.zoomAtCenter(this.zoom * ZOOM_STEP));
     this.zoomInput = this.add.dom(0, 0, this.makeZoomInput(font)).setOrigin(0);
 
+    this.placeLabel = this.add.text(0, 0, "To place", { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
     for (const p of this.players) {
-      this.playerSwatches.push(this.add.rectangle(0, 0, 14, 14, p.main_color).setOrigin(0));
-      this.playerTexts.push(this.add.text(0, 0, "", { fontFamily: font, fontSize: "14px", color: "#f8f5ff", lineSpacing: 2 }));
+      this.playerSwatches.push(this.add.rectangle(0, 0, PLAYER_SWATCH, PLAYER_SWATCH, p.main_color).setOrigin(0, 0.5));
+      this.playerTexts.push(this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#f8f5ff" }).setOrigin(0, 0.5));
+      this.playerCounts.push(this.add.text(0, 0, "", { fontFamily: display, fontSize: "24px", color: "#f8f5ff" }).setOrigin(1, 0.5));
     }
     const hint = "Click your shaded land to place a cell, or one of yours to take it back. Drag to pan, scroll to zoom.\nSpace: ready · ?: rules";
     this.hint = this.add.text(0, 0, hint, { fontFamily: font, fontSize: "13px", color: "#d4ccff", lineSpacing: 3 });
@@ -304,6 +312,8 @@ export default class GameScene extends Phaser.Scene {
       if (this.phase === "over" || this.rules || !this.view.contains(p.x, p.y)) return;
       this.zoomAt(this.zoom * Math.exp(-dy * ZOOM_SPEED), p.x, p.y);
     });
+    // a game always fits the window, so the page has nothing to scroll: the wheel is all the game's
+    keepWheel(this, () => true);
 
     this.ticker = this.time.addEvent({
       delay: GENERATION_MS,
@@ -313,7 +323,7 @@ export default class GameScene extends Phaser.Scene {
         this.board.step();
         this.board.claimTerritory();
         this.generation++;
-        if (this.checkFlags() || this.generation >= FINAL_GENERATION) this.finish();
+        if (this.checkFlags() || this.generation >= this.finalGeneration) this.finish();
         else if (this.generation % GRANT_EVERY === 0) {
           this.grantResources();
           this.startPhase("placing", PLACE_MS);
@@ -415,14 +425,21 @@ export default class GameScene extends Phaser.Scene {
     const g = this.flagGraphics.clear();
     for (const [p, c] of this.flags) {
       if (p.captured_at !== null) continue;
-      // only whole tiles, so a flag never spills past the board's visible area
-      if (c.x < this.view.x || c.y < this.view.y || c.x + c.w > this.view.right || c.y + c.h > this.view.bottom) continue;
-      const pole = Math.max(1, c.w * 0.1);
-      const px = c.x + c.w * 0.25;
-      g.fillStyle(FLAG_OUTLINE).fillRect(px - pole / 2, c.y + c.h * 0.12, pole, c.h * 0.78);
-      g.fillStyle(p.main_color).lineStyle(Math.max(1, c.w * 0.06), FLAG_OUTLINE);
-      g.fillTriangle(px, c.y + c.h * 0.12, px + c.w * 0.62, c.y + c.h * 0.3, px, c.y + c.h * 0.5);
-      g.strokeTriangle(px, c.y + c.h * 0.12, px + c.w * 0.62, c.y + c.h * 0.3, px, c.y + c.h * 0.5);
+      // the flag's own tile in white, unless a cell lives on it; inset so the grid lines still show
+      const tileShown = c.x >= this.view.x && c.y >= this.view.y && c.x + c.w <= this.view.right && c.y + c.h <= this.view.bottom;
+      if (tileShown && !c.is_alive) g.fillStyle(FLAG_TILE_COLOR).fillRect(c.x + 1, c.y + 1, c.w - 2, c.h - 2);
+      // the flag's box: the pole rises from the middle of the flag tile's bottom edge
+      const s = c.w * FLAG_SIZE;
+      const px = c.x + c.w / 2;
+      const x = px - s * 0.25;
+      const y = c.y + c.h - s * 0.9;
+      // only whole flags, so one never spills past the board's visible area
+      if (x < this.view.x || y < this.view.y || x + s > this.view.right || c.y + c.h > this.view.bottom) continue;
+      const pole = Math.max(1, s * 0.1);
+      g.fillStyle(FLAG_OUTLINE).fillRect(px - pole / 2, y + s * 0.12, pole, s * 0.78);
+      g.fillStyle(p.main_color).lineStyle(Math.max(1, s * 0.06), FLAG_OUTLINE);
+      g.fillTriangle(px, y + s * 0.12, px + s * 0.62, y + s * 0.3, px, y + s * 0.5);
+      g.strokeTriangle(px, y + s * 0.12, px + s * 0.62, y + s * 0.3, px, y + s * 0.5);
     }
   }
 
@@ -451,6 +468,11 @@ export default class GameScene extends Phaser.Scene {
     // Infinity - Infinity is NaN, which falls through to land like a tie would
     rows.sort((a, b) => b.survived - a.survived || b.land - a.land);
     return rows.map((r) => ({ ...r, place: 1 + rows.findIndex((q) => q.survived === r.survived && q.land === r.land) }));
+  }
+
+  /** The generation this game ends after: online, the server's word for it. */
+  private get finalGeneration() {
+    return this.online?.state?.finalGeneration ?? FINAL_GENERATION[this.mode];
   }
 
   /** Whether we've said we're done placing this phase, in an online game. */
@@ -595,12 +617,13 @@ export default class GameScene extends Phaser.Scene {
     else headline = winners[0] === this.human ? "You win!" : `${winners[0].name} wins`;
 
     const font = fontFamily();
+    const display = displayFont();
     const back = this.roomKind === "ranked" ? "Back to ranked" : this.roomKind === "classic" ? "Back to classic" : "Back to lobby";
     const results: Results = {
       // interactive so it catches clicks meant for the sidebar buttons underneath
       shade: this.add.rectangle(0, 0, 1, 1, 0x120e22, 0.75).setOrigin(0).setInteractive(),
       panel: this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0),
-      title: this.add.text(0, 0, headline, { fontFamily: font, fontSize: "32px", fontStyle: "bold", color: "#ffe03d", align: "center" }).setOrigin(0.5, 0),
+      title: this.add.text(0, 0, headline, { fontFamily: display, fontSize: "32px", fontStyle: "bold", color: "#ffe03d", align: "center" }).setOrigin(0.5, 0),
       standings: this.add.text(0, 0, "", { fontFamily: font, fontSize: "18px", color: "#f8f5ff", lineSpacing: 8 }).setOrigin(0.5, 0),
       button: makeButton(this, back, PRIMARY, () => this.toLobby()),
     };
@@ -741,11 +764,12 @@ export default class GameScene extends Phaser.Scene {
     this.rulesResume = !this.online && !this.paused;
     if (this.rulesResume) this.setPaused(true);
     const font = fontFamily();
+    const display = displayFont();
     const rules: Rules = {
       // interactive so it catches clicks meant for the board and sidebar underneath
       shade: this.add.rectangle(0, 0, 1, 1, 0x120e22, 0.75).setOrigin(0).setInteractive(),
       panel: this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0),
-      title: this.add.text(0, 0, "How to play", { fontFamily: font, fontSize: "28px", fontStyle: "bold", color: "#ffe03d" }),
+      title: this.add.text(0, 0, "How to play", { fontFamily: display, fontSize: "28px", fontStyle: "bold", color: "#ffe03d" }),
       body: this.add.text(0, 0, this.instructionsText(), { fontFamily: font, fontSize: "15px", color: "#f8f5ff", lineSpacing: 6 }),
       button: makeButton(this, this.online ? "Got it" : "Got it, let's play", PRIMARY, () => this.closeRules()),
     };
@@ -800,7 +824,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private updateGenerationText() {
-    this.generationText.setText(`Generation ${this.generation} / ${FINAL_GENERATION}`);
+    this.generationText.setText(`Generation ${this.generation} / ${this.finalGeneration}`);
   }
 
   private updatePhaseText() {
@@ -815,7 +839,7 @@ export default class GameScene extends Phaser.Scene {
     else if (this.placing && this.onlineReady) text = `Waiting for others (${secs}s)`;
     else if (this.phase === "setup") text = `Setup: place cells (${secs}s)`;
     else if (this.phase === "placing") text = `Place cells (${secs}s)`;
-    else if (this.generation + nextGrant >= FINAL_GENERATION) text = `Game ends in ${FINAL_GENERATION - this.generation} gens`;
+    else if (this.generation + nextGrant >= this.finalGeneration) text = `Game ends in ${this.finalGeneration - this.generation} gens`;
     else text = `Next placement in ${nextGrant} gens`;
     const urgent = this.canPlaceNow && !this.onlineReady && secs <= URGENT_SECS;
     this.phaseText.setText(text).setColor(this.notice || urgent ? "#ff4d5e" : "#ffe03d");
@@ -828,19 +852,19 @@ export default class GameScene extends Phaser.Scene {
       `• Live cells claim the land ${CLAIM_RADIUS} tiles around them.`,
       `• Every ${GRANT_EVERY} generations: ${PLACE_MS / 1000}s to place, +${ROUND_RESOURCES} cells, plus the cube root of land gained.`,
       this.mode === "ctf"
-        ? `• Capture the flag: if a rival's land covers your flag, you're out. Last colony standing wins; after generation ${FINAL_GENERATION}, the most land.`
-        : `• After generation ${FINAL_GENERATION}, whoever holds the most land wins.`,
+        ? `• Capture the flag: if a rival's land covers your flag, you're out. Last colony standing wins; after generation ${this.finalGeneration}, the most land.`
+        : `• After generation ${this.finalGeneration}, whoever holds the most land wins.`,
       "• Drag to pan, scroll or + / − to zoom, 0 to reset. Space to ready up, ? for these rules.",
     ].join("\n");
   }
 
   private updatePlayerTexts() {
     this.players.forEach((p, i) => {
-      const stats = `${p.resources} to place · ${this.board.territoryOf(p)} land · ${this.board.liveCellsOf(p)} alive`;
       // who's been captured; online, also who's dropped out and who's done placing
       const info = this.online?.state?.players[i];
       const tags = [p.captured_at !== null && "captured", info && !info.connected && "offline", this.placing && info?.ready && "ready"].filter(Boolean);
-      this.playerTexts[i].setText(`${p.name}${tags.length ? ` (${tags.join(", ")})` : ""}\n${stats}`);
+      this.playerTexts[i].setText(`${p.name}${tags.length ? ` (${tags.join(", ")})` : ""}`);
+      this.playerCounts[i].setText(String(p.resources));
     });
   }
 
@@ -951,16 +975,17 @@ export default class GameScene extends Phaser.Scene {
     let size: number, bx: number, by: number;
     let sx: number, sy: number, sh: number;
     const wide = (this.wide = width >= 720);
-    const sw = wide ? Phaser.Math.Clamp(width * 0.24, 220, 320) : width - PAD * 2;
+    // wide enough for the mode's name beside Quit, in the display font
+    const sw = wide ? Phaser.Math.Clamp(width * 0.24, 260, 320) : width - PAD * 2;
     const gap = 12;
     const cols = wide ? 1 : 2;
-    // narrow columns wrap the stats onto a second line
-    const rowH = wide ? PLAYER_ROW_H : PLAYER_ROW_H + 16;
+    const rowH = PLAYER_ROW_H;
     const playersY = wide ? 290 : 188;
-    const playersH = Math.ceil(this.players.length / cols) * rowH;
+    // the "To place" label, then the rows
+    const playersH = 26 + Math.ceil(this.players.length / cols) * rowH;
 
-    // wrap first: a title that wraps pushes everything below it down. It leaves room for Quit.
-    this.title.setWordWrapWidth(sw - 40 - this.quitText.width - 16);
+    // wrap first: a title that wraps pushes everything below it down. It leaves room for Rules and Quit.
+    this.title.setWordWrapWidth(sw - 40 - ICON_BTN * 2 - ICON_GAP - 12);
     const extra = this.title.height - this.titleLineH;
 
     if (wide) {
@@ -985,11 +1010,16 @@ export default class GameScene extends Phaser.Scene {
 
     this.sidebar.setPosition(sx, sy).setSize(sw, sh);
     this.title.setPosition(sx + 20, sy + 20);
-    this.quitText.setPosition(sx + sw - 20, sy + 26);
+    // [?] [×] in the top corner
+    const qx = sx + sw - 20 - ICON_BTN;
+    layoutButton(this.quitButton, qx, sy + 14, ICON_BTN, ICON_BTN);
+    layoutButton(this.rulesButton, qx - ICON_GAP - ICON_BTN, sy + 14, ICON_BTN, ICON_BTN);
+    const [cx, cy, arm] = [qx + ICON_BTN / 2, sy + 14 + ICON_BTN / 2, 7];
+    this.quitIcon.clear().lineStyle(4, 0xf8f5ff);
+    this.quitIcon.lineBetween(cx - arm, cy - arm, cx + arm, cy + arm).lineBetween(cx - arm, cy + arm, cx + arm, cy - arm);
     // everything under the title starts lower by however much the title wrapped
     const top = sy + extra;
     this.generationText.setPosition(sx + 20, top + 58);
-    this.rulesText.setPosition(sx + sw - 20, top + 58);
     this.phaseText.setPosition(sx + 20, top + 82);
 
     this.zoomLabel.setVisible(wide);
@@ -1015,13 +1045,15 @@ export default class GameScene extends Phaser.Scene {
       layoutButton(this.zoomInButton, sx + sw - 20 - BTN_H, top + 116, BTN_H);
     }
 
-    // per player: colour swatch, name, then stats
+    // "To place", then per player: colour swatch, name, and their cells to place on the right
+    this.placeLabel.setPosition(sx + 20, top + playersY);
     const colW = (sw - 40 - gap * (cols - 1)) / cols;
     this.players.forEach((_, i) => {
       const px = sx + 20 + (i % cols) * (colW + gap);
-      const py = top + playersY + Math.floor(i / cols) * rowH;
-      this.playerSwatches[i].setPosition(px, py + 2);
-      this.playerTexts[i].setPosition(px + 22, py).setWordWrapWidth(colW - 22);
+      const py = top + playersY + 26 + Math.floor(i / cols) * rowH + rowH / 2;
+      this.playerSwatches[i].setPosition(px, py);
+      this.playerTexts[i].setPosition(px + PLAYER_SWATCH + 10, py);
+      this.playerCounts[i].setPosition(px + colW, py);
     });
     this.updatePlayerTexts();
 

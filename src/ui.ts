@@ -31,14 +31,55 @@ export function makeSpinner(scene: Phaser.Scene, size = SPINNER_SIZE, color = 0x
   return g;
 }
 
-/** The site's font, for canvas text. */
+/**
+ * Let the page scroll when a screen needs more height than the window leaves the game. Call it from a layout with
+ * the height the screen needs: the game grows to at least that (and lays out again, a frame later, at the new
+ * size), then goes back to fitting the window when the scene shuts down.
+ */
+export function fitHeight(scene: Phaser.Scene, height: number) {
+  const main = document.querySelector("main");
+  const parent = scene.scale.parent as HTMLElement | null;
+  if (!main || !parent) return;
+  // the header and padding around the game
+  const around = main.getBoundingClientRect().height - parent.getBoundingClientRect().height;
+  const min = `${Math.ceil(height + around)}px`;
+  if (main.style.minHeight === min) return;
+  if (!main.style.minHeight) scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => setMinHeight(scene, ""));
+  setMinHeight(scene, min);
+}
+
+function setMinHeight(scene: Phaser.Scene, min: string) {
+  document.querySelector("main")!.style.minHeight = min;
+  // Phaser reads the game's new size on its next step; resizing right away would rerun the layout inside itself
+  scene.scale.dirty = true;
+}
+
+/**
+ * Phaser leaves wheel events to the page (config.ts), so it can scroll. Where `over` says a point (in game
+ * coordinates) belongs to the scene, such as a board that zooms, the page leaves them alone instead.
+ */
+export function keepWheel(scene: Phaser.Scene, over: (x: number, y: number) => boolean) {
+  const canvas = scene.game.canvas;
+  const onWheel = (e: WheelEvent) => {
+    if (e.target === canvas && over(e.offsetX, e.offsetY)) e.preventDefault();
+  };
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => canvas.removeEventListener("wheel", onWheel));
+}
+
+/** The site's text font, for canvas text read as sentences: statuses, stats, hints. */
 export function fontFamily() {
   return getComputedStyle(document.body).fontFamily;
 }
 
+/** The display font (Arco), for canvas titles, buttons and labels. */
+export function displayFont() {
+  return getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim();
+}
+
 export function makeButton(scene: Phaser.Scene, text: string, style: ButtonStyle, onClick: () => void): Button {
   const rect = scene.add.rectangle(0, 0, 1, 1, style.fill).setOrigin(0).setInteractive({ useHandCursor: true });
-  const label = scene.add.text(0, 0, text, { fontFamily: fontFamily(), fontSize: "20px", fontStyle: "bold", color: style.text }).setOrigin(0.5);
+  const label = scene.add.text(0, 0, text, { fontFamily: displayFont(), fontSize: "20px", fontStyle: "bold", color: style.text }).setOrigin(0.5);
   const button = { rect, label, style };
   // read the style through the button so setButtonStyle also changes the hover colours
   rect.on("pointerover", () => rect.setFillStyle(button.style.hover));
