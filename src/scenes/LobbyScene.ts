@@ -55,7 +55,7 @@ export default class LobbyScene extends Phaser.Scene {
         this.refresh();
       }),
     );
-    this.opponentsLabel = this.add.text(0, 0, "AI opponents", labelStyle);
+    this.opponentsLabel = this.add.text(0, 0, "Bots", labelStyle);
     this.opponentButtons = Array.from({ length: MAX_OPPONENTS }, (_, i) =>
       makeButton(this, `${i + 1}`, SECONDARY, () => {
         this.settings.opponents = i + 1;
@@ -81,7 +81,7 @@ export default class LobbyScene extends Phaser.Scene {
     this.opponentButtons.forEach((b, i) => setButtonStyle(b, i + 1 === opponents ? PRIMARY : SECONDARY));
     const rivals = PALETTE.filter((_, i) => i !== color)
       .slice(0, opponents)
-      .map((p) => `${p.name} AI`);
+      .map((p) => `${p.name} Bot`);
     const rule = mode === "ctf" ? MODES.find((m) => m.id === "ctf")!.rule : `${FINAL_GENERATION.strongest500} generations. Most land at the end wins.`;
     this.matchup.setText(`You vs ${rivals.join(", ")}\n${rule}`);
   }

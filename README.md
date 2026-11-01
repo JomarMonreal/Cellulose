@@ -24,7 +24,7 @@ npm run preview
 
 Apart from the playground and tutorial, every way has two modes: **Strongest 500** (most land after 500 generations) and **Capture the flag** (a rival's land over your flag knocks you out; last colony standing wins, or the most land after 1000 generations).
 
-- **Play with bots** runs entirely in the browser, against local AIs.
+- **Play with bots** runs entirely in the browser, against local bots.
 - **Play with friends** creates or joins a room on [CelluloseServer](../CelluloseServer), which holds the true board. The client only sends requests (place, remove, ready) and draws what the server broadcasts.
 You sign in (or sign up) on the first screen before choosing any of these; a sign-in is remembered across visits.
 

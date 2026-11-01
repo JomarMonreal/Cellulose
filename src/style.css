@@ -3,6 +3,8 @@
   --color-lilac: #9a8ae0;
   --color-yellow: #ffe03d;
   --color-cream: #f8f5ff;
+  /* the logo's violet */
+  --color-violet: #8b3bdb;
   /* display: titles, buttons and labels; text: anything read as a sentence. The canvas reads them through ui.ts */
   --font-display: "Arco", ui-sans-serif, system-ui, sans-serif;
   --font-text: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
@@ -70,8 +72,17 @@ h1 {
   letter-spacing: -0.025em;
 }
 
-.accent {
+/* "Cellulose" in the logo's colours, as on the home screen: Cell, u, lose */
+.cell {
   color: var(--color-yellow);
+}
+
+.u {
+  color: var(--color-cream);
+}
+
+.lose {
+  color: var(--color-violet);
 }
 
 .frame {

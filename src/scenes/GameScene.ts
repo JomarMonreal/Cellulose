@@ -592,7 +592,7 @@ export default class GameScene extends Phaser.Scene {
     const others = PALETTE.filter((_, i) => i !== color).slice(0, opponents);
     this.players = [
       new Player("You", PALETTE[color].color, false, START_RESOURCES),
-      ...others.map((o) => new Player(`${o.name} AI`, o.color, true, START_RESOURCES)),
+      ...others.map((o) => new Player(`${o.name} Bot`, o.color, true, START_RESOURCES)),
     ];
     const slots = [0, ...AI_CORNERS[opponents]];
     this.players.forEach((p, i) => {
