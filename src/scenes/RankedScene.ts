@@ -2,6 +2,7 @@ import * as Phaser from "phaser";
 import { type Mode, MODES } from "../modes";
 import Online from "../net/Online";
 import type { MatchKind } from "../net/protocol";
+import RankCard from "../RankCard";
 import {
   BTN_H,
   type Button,
@@ -24,11 +25,15 @@ import {
 const PAD = 24;
 const GAP = 12;
 const MODE_KEY = "cellulose:rankedMode";
+// wide enough for the panel and the rank card side by side
+const WIDE = 900;
+const CARD_GAP = 32;
 
 /**
  * Public matchmaking, ranked or classic. Ranked shows your rating and tier in each mode and needs an account;
  * classic is the same 4-player match with nothing at stake, open to guests. While waiting you can play with
  * bots; the game switches to the match once it's found. Signing out goes back to the sign-in screen.
+ * Ranked also shows the rank card from the home screen, beside the panel (below it on narrow screens).
  */
 export default class RankedScene extends Phaser.Scene {
   constructor() {
@@ -48,6 +53,8 @@ export default class RankedScene extends Phaser.Scene {
   private statusSpinner!: Phaser.GameObjects.Graphics;
   private errorText!: Phaser.GameObjects.Text;
   private backButton!: Button;
+  // ranked only, beside Back
+  private boardButton?: Button;
   private logoutText!: Phaser.GameObjects.Text;
   private ratings!: Phaser.GameObjects.Text;
   private modeLabel!: Phaser.GameObjects.Text;
@@ -56,6 +63,8 @@ export default class RankedScene extends Phaser.Scene {
   private queueText!: Phaser.GameObjects.Text;
   private queueSpinner!: Phaser.GameObjects.Graphics;
   private botsButton!: Button;
+  // ranked only
+  private card?: RankCard;
 
   init(data: { error?: string; kind?: MatchKind }) {
     this.online = Online.get();
@@ -64,6 +73,11 @@ export default class RankedScene extends Phaser.Scene {
     this.mode = MODES.some((m) => m.id === saved) ? (saved as Mode) : "strongest500";
     this.error = data?.error ?? "";
     this.busy = false;
+    this.card = undefined;
+  }
+
+  preload() {
+    RankCard.preload(this);
   }
 
   /** Ranked needs an account; classic just needs someone playing (a guest will do). */
@@ -88,6 +102,7 @@ export default class RankedScene extends Phaser.Scene {
     this.statusSpinner = makeSpinner(this);
     this.errorText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "15px", fontStyle: "bold", color: "#ff4d5e" });
     this.backButton = makeButton(this, "Back", SECONDARY, () => this.scene.start("HomeScene"));
+    this.boardButton = this.kind === "ranked" ? makeButton(this, "Leaderboard", SECONDARY, () => this.scene.start("LeaderboardScene", { mode: this.mode, from: "RankedScene" })) : undefined;
 
     this.logoutText = this.add
       .text(0, 0, "Log out", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
@@ -115,6 +130,7 @@ export default class RankedScene extends Phaser.Scene {
     // only signed-in players have something to log out of
     this.logoutText.setVisible(!!this.online.profile);
     this.ratings.setVisible(this.kind === "ranked");
+    if (this.kind === "ranked") this.card = new RankCard(this);
 
     const onClosed = (reason: string) => this.showError(reason);
     const onAuth = () => (this.allowed ? this.refresh() : this.scene.start("AuthScene"));
@@ -177,6 +193,7 @@ export default class RankedScene extends Phaser.Scene {
 
     this.status.setText(online.connectionStatus ?? (profile ? `Signed in as ${profile.username}` : `Playing as ${online.guest} (guest)`));
     this.errorText.setText(this.error);
+    this.card?.refresh();
     setButtonVisible(this.botsButton, !!queue);
 
     if (profile && this.kind === "ranked") {
@@ -206,7 +223,7 @@ export default class RankedScene extends Phaser.Scene {
     this.layout(this.scale.gameSize);
   }
 
-  /** A centred panel; rows of equal-width buttons fill its width. */
+  /** A centred panel, rows of equal-width buttons filling its width; in ranked, the rank card beside it or below it. */
   private layout({ width, height }: Phaser.Structs.Size) {
     const queued = !!this.online.queue;
     const connected = this.online.connected;
@@ -221,9 +238,25 @@ export default class RankedScene extends Phaser.Scene {
     const ratingsH = this.ratings.visible ? this.ratings.height + 24 : 0;
     const body = ratingsH + 24 + BTN_H + 24 + BTN_H + 12 + this.queueText.height + 24 + (queued ? BTN_H + 24 : 0);
     const ph = head + body + errorH + BTN_H + 32;
-    fitHeight(this, ph + PAD * 2);
-    const px = (width - pw) / 2;
-    const py = Math.max(PAD, (height - ph) / 2);
+    let px = (width - pw) / 2;
+    let py = Math.max(PAD, (height - ph) / 2);
+    const { card } = this;
+    if (!card) fitHeight(this, ph + PAD * 2);
+    else if (width >= WIDE) {
+      const cw = Math.min(440, width - PAD * 2 - pw - CARD_GAP);
+      const ch = Math.max(ph, card.measure(cw, cw >= 400));
+      fitHeight(this, ch + card.footH + PAD * 2);
+      px = (width - pw - CARD_GAP - cw) / 2;
+      const top = Math.max(PAD, (height - ch - card.footH) / 2);
+      py = top + (ch - ph) / 2;
+      card.layout(px + pw + CARD_GAP, top, cw, ch);
+    } else {
+      const ch = card.measure(pw, false);
+      const totalH = ph + CARD_GAP + ch + card.footH;
+      fitHeight(this, totalH + PAD * 2);
+      py = Math.max(PAD, (height - totalH) / 2);
+      card.layout(px, py + ph + CARD_GAP, pw, ch);
+    }
     const x = px + 32;
     this.panel.setPosition(px, py).setSize(pw, ph);
 
@@ -255,7 +288,8 @@ export default class RankedScene extends Phaser.Scene {
       this.errorText.setPosition(x, y);
       y += this.errorText.height + 16;
     }
-    layoutButton(this.backButton, x, y, inner);
+    if (this.boardButton) this.layoutRow([this.boardButton, this.backButton], x, y, inner);
+    else layoutButton(this.backButton, x, y, inner);
   }
 
   private layoutRow(buttons: Button[], x: number, y: number, w: number) {

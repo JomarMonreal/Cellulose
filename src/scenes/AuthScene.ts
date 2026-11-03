@@ -57,7 +57,9 @@ export default class AuthScene extends Phaser.Scene {
 
   init(data?: { message?: string; then?: string }) {
     this.online = Online.get();
-    this.error = "";
+    // signed out because the account signed in elsewhere: say so, once
+    this.error = this.online.signedOutBecause ?? "";
+    this.online.signedOutBecause = null;
     this.busy = false;
     this.message = data?.message;
     this.then = data?.then ?? "HomeScene";

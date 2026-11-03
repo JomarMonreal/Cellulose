@@ -22,6 +22,7 @@ import {
   setButtonDepth,
   setButtonLoading,
   showFocus,
+  textInput,
 } from "../ui";
 
 const PAD = 24;
@@ -62,23 +63,30 @@ const PLACE_MS = 30_000;
 // an AI places one cell every AI_PLACE_MIN_MS..AI_PLACE_MAX_MS during a placement phase
 const AI_PLACE_MIN_MS = 150;
 const AI_PLACE_MAX_MS = 500;
-// corners clockwise from the human's top-left: one opponent sits across the board, two take the corners beside you
-const AI_CORNERS: Record<number, number[]> = { 1: [2], 2: [1, 3], 3: [1, 2, 3] };
-const PLAYER_ROW_H = 40;
-const PLAYER_SWATCH = 24;
+// each player's corner, clockwise from the top-left, by how many play: the first player (you, offline) takes the
+// top-left, one opponent sits across the board, two take the corners beside you. The server seats online games the same way.
+const CORNER_SLOTS: Record<number, number[]> = { 1: [0], 2: [0, 2], 3: [0, 1, 3], 4: [0, 1, 2, 3] };
+// each player's badge sits at their corner, in a band above or below the board: their initial on a disc in their colour,
+// then their name and how many cells they have left to place
+const BADGE_BAND = 52;
+const BADGE_BAND_NARROW = 44;
+const BADGE_RING = 0x120e22;
 // the square Rules and Quit buttons in the sidebar's top corner
 const ICON_BTN = 40;
 const ICON_GAP = 8;
-// the bottom of the sidebar shows one of each basic kind of pattern, from the tutorial's guide
-const SIDEBAR_PATTERNS = [
+// the Patterns popup shows one of each basic kind of pattern, from the tutorial's guide
+const PATTERN_PICKS = [
   ["Still life", "Block"],
   ["Oscillator", "Blinker"],
   ["Spaceship", "Glider"],
   ["Methuselah", "R-pentomino"],
 ] as const;
-const PATTERN_DRAWING_H = 56;
-// a pattern's drawing, then its name and kind
-const PATTERN_ITEM_H = PATTERN_DRAWING_H + 50;
+const PATTERN_DRAWING_H = 72;
+// the chat fills the sidebar under the controls, at least this tall beside the board, and exactly this tall below it
+const CHAT_MIN_H = 200;
+const CHAT_NARROW_H = 150;
+const CHAT_INPUT_H = 40;
+const CHAT_MAX = 200;
 // the results panel draws over everything else
 const RESULTS_DEPTH = 10;
 // how long a notice (a refused request, a click that can't place) replaces the phase text
@@ -121,6 +129,26 @@ type Rules = {
   button: Button;
 };
 
+type Patterns = {
+  shade: Phaser.GameObjects.Rectangle;
+  panel: Phaser.GameObjects.Rectangle;
+  title: Phaser.GameObjects.Text;
+  drawings: Phaser.GameObjects.Graphics;
+  // per pattern: its name, its kind (in the guide section's colour) and what it does
+  names: Phaser.GameObjects.Text[];
+  kinds: Phaser.GameObjects.Text[];
+  abouts: Phaser.GameObjects.Text[];
+  button: Button;
+};
+
+/** A player at their corner of the board. */
+type Badge = {
+  disc: Phaser.GameObjects.Graphics;
+  letter: Phaser.GameObjects.Text;
+  name: Phaser.GameObjects.Text;
+  count: Phaser.GameObjects.Text;
+};
+
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super("GameScene");
@@ -161,17 +189,22 @@ export default class GameScene extends Phaser.Scene {
   private zoomInButton!: Button;
   // an HTML input so the zoom percentage can be typed in
   private zoomInput!: Phaser.GameObjects.DOMElement;
-  private playerSwatches!: Phaser.GameObjects.Rectangle[];
-  private playerTexts!: Phaser.GameObjects.Text[];
-  // how many cells each player has left to place, big beside their name
-  private playerCounts!: Phaser.GameObjects.Text[];
-  private placeLabel!: Phaser.GameObjects.Text;
+  // per player, in seat order: their badge and the corner it's in (0..3, clockwise from the top-left)
+  private badges!: Badge[];
+  private corners!: number[];
+  // height of the bands above and below the board that hold the badges
+  private badgeBand!: number;
+  // per badge, how wide its name may be before it's cut short
+  private badgeTextW!: number[];
   private hint!: Phaser.GameObjects.Text;
-  private patternsLabel!: Phaser.GameObjects.Text;
-  private patternNames!: Phaser.GameObjects.Text[];
-  private patternKinds!: Phaser.GameObjects.Text[];
-  private patternDrawings!: Phaser.GameObjects.Graphics;
-  private sidebarPatterns!: { cells: [number, number][]; color: number }[];
+  private patternsButton!: Button;
+  // the patterns overlay, while it's open
+  private patterns?: Patterns;
+  // HTML, pinned to the sidebar's foot: it never scrolls with the controls above it
+  private chat!: Phaser.GameObjects.DOMElement;
+  private chatLog!: HTMLDivElement;
+  private chatInput!: HTMLInputElement;
+  private chatH!: number;
   // the sidebar's contents have their own camera, clipped to the panel, so they scroll inside it
   private sidebarCam!: Phaser.Cameras.Scene2D.Camera;
   // overlays (rules, results) have a camera on top of everything, so their shade covers the sidebar too
@@ -188,8 +221,8 @@ export default class GameScene extends Phaser.Scene {
   private wide!: boolean;
   // the how-to-play overlay, while it's open
   private rules?: Rules;
-  // the overlay paused an offline game; closing it resumes
-  private rulesResume!: boolean;
+  // the rules or patterns overlay paused an offline game; closing it resumes
+  private overlayResume!: boolean;
   // shown once the game is over
   private results?: Results;
 
@@ -240,12 +273,15 @@ export default class GameScene extends Phaser.Scene {
     this.seat = this.online?.seat ?? 0;
     this.notice = "";
     this.noticeLeft = 0;
-    this.playerSwatches = [];
-    this.playerTexts = [];
-    this.playerCounts = [];
+    this.badges = [];
+    this.corners = [];
+    this.badgeBand = BADGE_BAND;
+    this.badgeTextW = [];
+    this.chatH = CHAT_MIN_H;
     this.results = undefined;
     this.rules = undefined;
-    this.rulesResume = false;
+    this.patterns = undefined;
+    this.overlayResume = false;
     this.wide = true;
     this.generation = 0;
     this.players = [];
@@ -302,24 +338,20 @@ export default class GameScene extends Phaser.Scene {
     this.zoomInButton = makeButton(this, "+", SECONDARY, () => this.zoomAtCenter(this.zoom * ZOOM_STEP));
     this.zoomInput = this.add.dom(0, 0, this.makeZoomInput(font)).setOrigin(0);
 
-    this.placeLabel = this.add.text(0, 0, "To place", { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
-    for (const p of this.players) {
-      this.playerSwatches.push(this.add.rectangle(0, 0, PLAYER_SWATCH, PLAYER_SWATCH, p.main_color).setOrigin(0, 0.5));
-      this.playerTexts.push(this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#f8f5ff" }).setOrigin(0, 0.5));
-      this.playerCounts.push(this.add.text(0, 0, "", { fontFamily: display, fontSize: "24px", color: "#f8f5ff" }).setOrigin(1, 0.5));
-    }
-    const hint = "Click your shaded land to place a cell, or one of yours to take it back. Drag to pan, scroll to zoom.\nSpace: ready · ?: rules";
+    this.patternsButton = makeButton(this, "Patterns", SECONDARY, () => this.openPatterns());
+    const keys = this.online ? "Space: ready · ?: rules · P: patterns · Enter: chat" : "Space: ready · ?: rules · P: patterns";
+    const hint = `Click your shaded land to place a cell, or one of yours to take it back. Drag to pan, scroll to zoom.\n${keys}`;
     this.hint = this.add.text(0, 0, hint, { fontFamily: font, fontSize: "13px", color: "#d4ccff", lineSpacing: 3 });
-    this.patternsLabel = this.add.text(0, 0, "Patterns", { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
-    const guide = GUIDE.flatMap((s) => s.patterns.map((p) => ({ ...p, color: s.color })));
-    const patterns = SIDEBAR_PATTERNS.map(([kind, name]) => ({ kind, ...guide.find((p) => p.name === name)! }));
-    this.patternNames = patterns.map((p) => this.add.text(0, 0, p.name, { fontFamily: display, fontSize: "14px", color: "#f8f5ff" }));
-    this.patternKinds = patterns.map((p) =>
-      this.add.text(0, 0, p.kind, { fontFamily: font, fontSize: "13px", fontStyle: "bold", color: `#${p.color.toString(16).padStart(6, "0")}` }),
-    );
-    this.patternDrawings = this.add.graphics();
-    this.sidebarPatterns = patterns;
     this.scrollbar = this.add.graphics();
+
+    // drawn by the main camera, around the board
+    this.corners = CORNER_SLOTS[this.players.length];
+    this.badges = this.players.map((_, i) => ({
+      disc: this.add.graphics(),
+      letter: this.add.text(0, 0, initial(this.realName(i)), { fontFamily: display, fontSize: "20px", color: "#120e22" }).setOrigin(0.5),
+      name: this.add.text(0, 0, "", { fontFamily: font, fontSize: "13px", fontStyle: "bold", color: "#f8f5ff" }),
+      count: this.add.text(0, 0, "", { fontFamily: display, fontSize: "18px", color: "#ffe03d" }),
+    }));
 
     // everything below the sidebar's title bar moves with the sidebar's scroll; the main camera skips it
     const sidebarObjects: Phaser.GameObjects.GameObject[] = [
@@ -328,16 +360,10 @@ export default class GameScene extends Phaser.Scene {
       this.generationText,
       this.phaseText,
       this.zoomLabel,
-      this.placeLabel,
-      ...this.playerSwatches,
-      ...this.playerTexts,
-      ...this.playerCounts,
       this.hint,
-      this.patternsLabel,
-      ...this.patternNames,
-      ...this.patternKinds,
-      this.patternDrawings,
-      ...[this.rulesButton, this.quitButton, this.playButton, this.stopButton, this.zoomOutButton, this.zoomInButton].flatMap((b) => [b.rect, b.label]),
+      ...[this.rulesButton, this.quitButton, this.playButton, this.stopButton, this.zoomOutButton, this.zoomInButton, this.patternsButton].flatMap(
+        (b) => [b.rect, b.label],
+      ),
     ];
     const others = this.children.list.filter((o) => !sidebarObjects.includes(o));
     this.cameras.main.ignore(sidebarObjects);
@@ -348,13 +374,17 @@ export default class GameScene extends Phaser.Scene {
     // and scrollSidebar moves it with the sidebar's contents
     this.cameras.main.ignore(this.zoomInput);
     this.overlayCam.ignore(this.children.list.filter((o) => o !== this.zoomInput));
+    // the chat is HTML too, shown by the top camera only; it stays put at the sidebar's foot
+    this.chat = this.add.dom(0, 0, this.makeChat(font, display)).setOrigin(0);
+    this.showOnTop([this.chat]);
+    this.renderChat();
 
     // drag pans the board; a click (press and release without dragging) places or takes back a cell
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      this.pressed = this.phase !== "over" && !this.rules && this.view.contains(p.x, p.y);
+      this.pressed = this.phase !== "over" && !this.modal && this.view.contains(p.x, p.y);
       this.panning = false;
       // dragging in the sidebar scrolls it (handy on touch screens)
-      this.sidebarDrag = !this.rules && !this.results && this.sidebarView.contains(p.x, p.y);
+      this.sidebarDrag = !this.modal && !this.results && this.sidebarView.contains(p.x, p.y);
     });
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
       if (this.sidebarDrag && p.isDown) return this.scrollSidebar(p.prevPosition.y - p.y);
@@ -385,7 +415,7 @@ export default class GameScene extends Phaser.Scene {
 
     // scroll over the board to zoom, keeping the point under the cursor fixed; over the sidebar, to scroll it
     this.input.on("wheel", (p: Phaser.Input.Pointer, _objs: unknown, _dx: number, dy: number) => {
-      if (this.rules || this.results) return;
+      if (this.modal || this.results) return;
       if (this.sidebarView.contains(p.x, p.y)) return this.scrollSidebar(dy);
       if (this.phase === "over" || !this.view.contains(p.x, p.y)) return;
       this.zoomAt(this.zoom * Math.exp(-dy * ZOOM_SPEED), p.x, p.y);
@@ -431,9 +461,19 @@ export default class GameScene extends Phaser.Scene {
         this.rankedResult = r;
         if (this.results) this.showStandings();
       };
-      online.on("state", this.applyState, this).on("status", this.updatePhaseText, this).on("closed", onClosed).on("ranked", onRanked);
+      online
+        .on("state", this.applyState, this)
+        .on("status", this.updatePhaseText, this)
+        .on("closed", onClosed)
+        .on("ranked", onRanked)
+        .on("chat", this.renderChat, this);
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
-        online.off("state", this.applyState, this).off("status", this.updatePhaseText, this).off("closed", onClosed).off("ranked", onRanked),
+        online
+          .off("state", this.applyState, this)
+          .off("status", this.updatePhaseText, this)
+          .off("closed", onClosed)
+          .off("ranked", onRanked)
+          .off("chat", this.renderChat, this),
       );
     }
   }
@@ -594,7 +634,7 @@ export default class GameScene extends Phaser.Scene {
       new Player("You", PALETTE[color].color, false, START_RESOURCES),
       ...others.map((o) => new Player(`${o.name} Bot`, o.color, true, START_RESOURCES)),
     ];
-    const slots = [0, ...AI_CORNERS[opponents]];
+    const slots = CORNER_SLOTS[this.players.length];
     this.players.forEach((p, i) => {
       const [row, col] = corners[slots[i]];
       this.board.setTerritory(p, row, col, s, s);
@@ -688,6 +728,7 @@ export default class GameScene extends Phaser.Scene {
     this.syncTicker();
     this.redraw();
     this.closeRules();
+    this.closePatterns();
     this.hoverGraphics.clear();
     this.input.setDefaultCursor("default");
 
@@ -711,7 +752,7 @@ export default class GameScene extends Phaser.Scene {
     setButtonDepth(results.button, RESULTS_DEPTH);
     this.results = results;
     this.showOnTop([results.shade, results.panel, results.title, results.standings, results.button.rect, results.button.label]);
-    this.syncZoomInput();
+    this.syncDom();
     this.showStandings();
   }
 
@@ -795,7 +836,7 @@ export default class GameScene extends Phaser.Scene {
     const g = this.hoverGraphics.clear();
     const p = this.input.activePointer;
     if (this.panning) return this.input.setDefaultCursor("grabbing");
-    const cell = !this.rules && !p.wasTouch && this.view.contains(p.x, p.y) ? this.board.cellAt(p.x, p.y) : null;
+    const cell = !this.modal && !p.wasTouch && this.view.contains(p.x, p.y) ? this.board.cellAt(p.x, p.y) : null;
     const action = cell && this.clickAction(cell);
     this.input.setDefaultCursor(action ? "pointer" : "default");
     if (!cell || !action) return;
@@ -810,13 +851,17 @@ export default class GameScene extends Phaser.Scene {
     g.strokeRect(x, y, w, h);
   }
 
-  /** Space plays or readies, + and - zoom, 0 resets the view, ? shows the rules and Escape hides them. Not while typing in a field. */
+  /**
+   * Space plays or readies, + and - zoom, 0 resets the view, ? shows the rules, P the patterns, Enter types in the
+   * chat, and Escape closes an overlay. Not while typing in a field.
+   */
   private onKey(e: KeyboardEvent) {
     if (document.activeElement instanceof HTMLInputElement) return;
-    if (this.rules) {
-      if (e.key === "Escape" || e.key === "Enter" || e.key === " " || e.key === "?") {
+    if (this.modal) {
+      if (["Escape", "Enter", " ", "?", "p", "P"].includes(e.key)) {
         e.preventDefault();
         this.closeRules();
+        this.closePatterns();
       }
       return;
     }
@@ -825,7 +870,11 @@ export default class GameScene extends Phaser.Scene {
       e.preventDefault();
       this.play();
     } else if (e.key === "?" || e.key === "h") this.openRules();
-    else if (e.key === "+" || e.key === "=") this.zoomAtCenter(this.zoom * ZOOM_STEP);
+    else if (e.key === "p" || e.key === "P") this.openPatterns();
+    else if (e.key === "Enter" && this.online) {
+      e.preventDefault();
+      this.chatInput.focus();
+    } else if (e.key === "+" || e.key === "=") this.zoomAtCenter(this.zoom * ZOOM_STEP);
     else if (e.key === "-" || e.key === "_") this.zoomAtCenter(this.zoom / ZOOM_STEP);
     else if (e.key === "0") {
       this.zoom = 1;
@@ -834,16 +883,31 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  /** The how-to-play overlay. Offline, the game pauses while it's open so reading doesn't cost setup time. */
+  /** The rules or the patterns are open over the game. */
+  private get modal() {
+    return !!this.rules || !!this.patterns;
+  }
+
+  /** Offline, an overlay pauses the game while it's open, so reading doesn't cost setup time. */
+  private pauseForOverlay() {
+    this.overlayResume = !this.online && !this.paused;
+    if (this.overlayResume) this.setPaused(true);
+  }
+
+  private resumeAfterOverlay() {
+    if (this.overlayResume) this.setPaused(false);
+    this.overlayResume = false;
+  }
+
+  /** The how-to-play overlay. */
   private openRules() {
-    if (this.rules || this.phase === "over") return;
+    if (this.modal || this.phase === "over") return;
     try {
       localStorage.setItem(RULES_SEEN_KEY, "1");
     } catch {
       // private browsing: it'll just open again next game
     }
-    this.rulesResume = !this.online && !this.paused;
-    if (this.rulesResume) this.setPaused(true);
+    this.pauseForOverlay();
     const font = fontFamily();
     const display = displayFont();
     const rules: Rules = {
@@ -858,7 +922,7 @@ export default class GameScene extends Phaser.Scene {
     setButtonDepth(rules.button, RESULTS_DEPTH);
     this.rules = rules;
     this.showOnTop([rules.shade, rules.panel, rules.title, rules.body, rules.button.rect, rules.button.label]);
-    this.syncZoomInput();
+    this.syncDom();
     this.drawHover();
     this.layoutRules(this.scale.gameSize);
   }
@@ -868,9 +932,8 @@ export default class GameScene extends Phaser.Scene {
     const { shade, panel, title, body, button } = this.rules;
     for (const o of [shade, panel, title, body, button.rect, button.label]) o.destroy();
     this.rules = undefined;
-    this.syncZoomInput();
-    if (this.rulesResume) this.setPaused(false);
-    this.rulesResume = false;
+    this.syncDom();
+    this.resumeAfterOverlay();
   }
 
   /** Rules panel centred over the whole screen; the text shrinks if it wouldn't fit. */
@@ -891,14 +954,189 @@ export default class GameScene extends Phaser.Scene {
     layoutButton(r.button, px + 32, py + ph - 32 - BTN_H, pw - 64);
   }
 
+  /** One of each basic kind of pattern, drawn and explained, from the tutorial's guide. */
+  private openPatterns() {
+    if (this.modal || this.phase === "over") return;
+    this.pauseForOverlay();
+    const font = fontFamily();
+    const display = displayFont();
+    const picks = this.patternPicks();
+    const patterns: Patterns = {
+      // interactive so it catches clicks meant for the board and sidebar underneath
+      shade: this.add.rectangle(0, 0, 1, 1, 0x120e22, 0.75).setOrigin(0).setInteractive(),
+      panel: this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0),
+      title: this.add.text(0, 0, "Patterns", { fontFamily: display, fontSize: "28px", fontStyle: "bold", color: "#ffe03d" }),
+      drawings: this.add.graphics(),
+      names: picks.map((p) => this.add.text(0, 0, p.name, { fontFamily: display, fontSize: "16px", color: "#f8f5ff" })),
+      kinds: picks.map((p) =>
+        this.add.text(0, 0, p.kind, { fontFamily: font, fontSize: "13px", fontStyle: "bold", color: `#${p.color.toString(16).padStart(6, "0")}` }),
+      ),
+      abouts: picks.map((p) => this.add.text(0, 0, p.about, { fontFamily: font, fontSize: "13px", color: "#d4ccff", lineSpacing: 2 })),
+      button: makeButton(this, "Close", PRIMARY, () => this.closePatterns()),
+    };
+    const objects = [patterns.shade, patterns.panel, patterns.title, patterns.drawings, ...patterns.names, ...patterns.kinds, ...patterns.abouts];
+    for (const o of objects) o.setDepth(RESULTS_DEPTH);
+    setButtonDepth(patterns.button, RESULTS_DEPTH);
+    this.patterns = patterns;
+    this.showOnTop([...objects, patterns.button.rect, patterns.button.label]);
+    this.syncDom();
+    this.drawHover();
+    this.layoutPatterns(this.scale.gameSize);
+  }
+
+  private closePatterns() {
+    if (!this.patterns) return;
+    const { shade, panel, title, drawings, names, kinds, abouts, button } = this.patterns;
+    for (const o of [shade, panel, title, drawings, ...names, ...kinds, ...abouts, button.rect, button.label]) o.destroy();
+    this.patterns = undefined;
+    this.syncDom();
+    this.resumeAfterOverlay();
+  }
+
+  /** PATTERN_PICKS from the tutorial's guide, each in its section's colour. */
+  private patternPicks() {
+    const guide = GUIDE.flatMap((s) => s.patterns.map((p) => ({ ...p, color: s.color })));
+    return PATTERN_PICKS.map(([kind, name]) => ({ kind, ...guide.find((p) => p.name === name)! }));
+  }
+
+  /** Patterns panel centred over the whole screen, two to a row; on a screen too short for it, without what each does. */
+  private layoutPatterns({ width, height }: { width: number; height: number }) {
+    const p = this.patterns!;
+    const picks = this.patternPicks();
+    const pw = Math.min(600, width - PAD * 2);
+    const gap = 20;
+    const itemW = (pw - 64 - gap) / 2;
+    for (const t of p.abouts) t.setWordWrapWidth(itemW).setVisible(true);
+    const itemH = (i: number) => PATTERN_DRAWING_H + 10 + p.names[i].height + p.kinds[i].height + (p.abouts[i].visible ? 6 + p.abouts[i].height : 0);
+    const rowH = (row: number) => Math.max(itemH(row * 2), itemH(row * 2 + 1));
+    const measure = () => 32 + p.title.height + 20 + rowH(0) + gap + rowH(1) + 28 + BTN_H + 32;
+    if (measure() > height - PAD * 2) for (const t of p.abouts) t.setVisible(false);
+    const ph = measure();
+    const px = (width - pw) / 2;
+    const py = Math.max(PAD, (height - ph) / 2);
+    p.shade.setSize(width, height);
+    (p.shade.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, width, height);
+    p.panel.setPosition(px, py).setSize(pw, ph);
+    p.title.setPosition(px + 32, py + 32);
+    let y = py + 32 + p.title.height + 20;
+    p.drawings.clear();
+    for (const row of [0, 1]) {
+      for (const i of [row * 2, row * 2 + 1]) {
+        const x = px + 32 + (i % 2) * (itemW + gap);
+        drawPattern(p.drawings, picks[i].cells, picks[i].color, x, y, itemW, PATTERN_DRAWING_H, 14);
+        let ty = y + PATTERN_DRAWING_H + 10;
+        p.names[i].setPosition(x, ty);
+        ty += p.names[i].height;
+        p.kinds[i].setPosition(x, ty);
+        p.abouts[i].setPosition(x, ty + p.kinds[i].height + 6);
+      }
+      y += rowH(row) + gap;
+    }
+    layoutButton(p.button, px + 32, py + ph - 32 - BTN_H, pw - 64);
+  }
+
+  /** The chat box: a label, the log, and a field to type in. Offline there's nobody to talk to, so it says so. */
+  private makeChat(font: string, display: string) {
+    // Phaser sets the outer element's display on every frame (to show or hide it), so the flex column goes inside it
+    const outer = document.createElement("div");
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      boxSizing: "border-box",
+      height: "100%",
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
+      paddingTop: "14px",
+      borderTop: "2px solid #2b2448",
+    });
+    const label = document.createElement("div");
+    label.textContent = "Chat";
+    Object.assign(label.style, { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
+    const log = document.createElement("div");
+    log.setAttribute("role", "log");
+    log.setAttribute("aria-label", "Chat messages");
+    Object.assign(log.style, {
+      flex: "1",
+      minHeight: "0",
+      overflowY: "auto",
+      padding: "8px 10px",
+      background: "#15112a",
+      color: "#f8f5ff",
+      fontFamily: font,
+      fontSize: "14px",
+      lineHeight: "1.35",
+      overflowWrap: "anywhere",
+    });
+    const input = textInput(font, this.online ? "Say something…" : "Chat is for online games", CHAT_MAX);
+    Object.assign(input.style, { flex: "none", width: "100%", height: `${CHAT_INPUT_H}px`, fontSize: "15px", padding: "0 12px" });
+    input.disabled = !this.online;
+    if (!this.online) input.style.opacity = "0.5";
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") this.sendChat();
+      if (e.key === "Escape") input.blur();
+    });
+    box.append(label, log, input);
+    outer.append(box);
+    this.chatLog = log;
+    this.chatInput = input;
+    return outer;
+  }
+
+  private sendChat() {
+    const text = this.chatInput.value.trim();
+    if (!text || !this.online) return;
+    this.chatInput.value = "";
+    void this.online.sendChat(text).then((r) => {
+      if (r.ok || !this.scene.isActive()) return;
+      this.say(r.reason);
+      // give the line back, so it can be sent again
+      if (!this.chatInput.value) this.chatInput.value = text;
+    });
+  }
+
+  /** Show the room's chat, following the newest line unless the log was scrolled up to read. */
+  private renderChat() {
+    const log = this.chatLog;
+    const following = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+    const note = (text: string) => {
+      const line = document.createElement("div");
+      line.textContent = text;
+      Object.assign(line.style, { color: "#9a8ae0", fontStyle: "italic" });
+      return line;
+    };
+    const messages = this.online?.chat ?? [];
+    if (!this.online) log.replaceChildren(note("Play with friends, classic or ranked to chat with the other players."));
+    else if (!messages.length) log.replaceChildren(note("No messages yet. Say hi!"));
+    else {
+      log.replaceChildren(
+        ...messages.map((m) => {
+          // textContent, never HTML: these come from other players
+          const line = document.createElement("div");
+          const who = document.createElement("span");
+          who.textContent = m.from === this.online!.id ? "You" : m.name;
+          Object.assign(who.style, { fontWeight: "bold", color: `#${(PALETTE[m.color]?.color ?? 0xd4ccff).toString(16).padStart(6, "0")}` });
+          line.append(who, `: ${m.text}`);
+          return line;
+        }),
+      );
+    }
+    const mine = messages.at(-1)?.from === this.online?.id;
+    if (following || mine) log.scrollTop = log.scrollHeight;
+  }
+
   /**
-   * The zoom field is HTML, so it would sit on top of an overlay, and the sidebar's camera can't clip it: it hides
-   * once scrolled even partly out of view. Narrow screens just use - and +.
+   * The zoom field and the chat are HTML, so they'd sit on top of an overlay: they hide while one is open. The
+   * sidebar's camera can't clip the zoom field either, so it hides once scrolled even partly out of view. Narrow
+   * screens just use - and +.
    */
-  private syncZoomInput() {
+  private syncDom() {
     const top = this.zoomInput.y;
     const inView = top >= this.sidebarView.y && top + BTN_H <= this.sidebarView.bottom;
-    this.zoomInput.setVisible(this.wide && !this.rules && !this.results && inView);
+    const clear = !this.modal && !this.results;
+    this.zoomInput.setVisible(this.wide && clear && inView);
+    // the chat is made after the zoom field, so an early call can come before it exists
+    this.chat?.setVisible(clear);
+    if (!clear && document.activeElement === this.chatInput) this.chatInput.blur();
   }
 
   /** Overlay objects show on the top camera only, above the board and the sidebar's contents. */
@@ -920,7 +1158,7 @@ export default class GameScene extends Phaser.Scene {
       const bar = Math.max(24, (track * h) / (h + this.sidebarMaxScroll));
       g.fillStyle(0xf8f5ff, 0.25).fillRect(x + w - 7, y + 8 + ((track - bar) * this.sidebarScroll) / this.sidebarMaxScroll, 3, bar);
     }
-    this.syncZoomInput();
+    this.syncDom();
   }
 
   /** Let an AI place its next cell. False if it has nothing it can place. */
@@ -963,18 +1201,59 @@ export default class GameScene extends Phaser.Scene {
       this.mode === "ctf"
         ? `• Capture the flag: if a rival's land covers your flag, you're out. Last colony standing wins; after generation ${this.finalGeneration}, the most land.`
         : `• After generation ${this.finalGeneration}, whoever holds the most land wins.`,
-      "• Drag to pan, scroll or + / − to zoom, 0 to reset. Space to ready up, ? for these rules.",
+      "• Drag to pan, scroll or + / − to zoom, 0 to reset. Space to ready up, ? for these rules, P for patterns.",
     ].join("\n");
   }
 
+  /** A player's own name: the board calls you "You", but your badge's letter is your username or guest name. */
+  private realName(i: number) {
+    if (this.online) return this.online.state?.players[i]?.name ?? this.players[i].name;
+    return this.players[i] === this.human ? (Online.get().player ?? this.human.name) : this.players[i].name;
+  }
+
+  /** Each badge's name and cells to place; a captured player's badge fades. */
   private updatePlayerTexts() {
     this.players.forEach((p, i) => {
       // who's been captured; online, also who's dropped out and who's done placing
       const info = this.online?.state?.players[i];
       const tags = [p.captured_at !== null && "captured", info && !info.connected && "offline", this.placing && info?.ready && "ready"].filter(Boolean);
-      this.playerTexts[i].setText(`${p.name}${tags.length ? ` (${tags.join(", ")})` : ""}`);
-      this.playerCounts[i].setText(String(p.resources));
+      const { disc, letter, name, count } = this.badges[i];
+      const maxW = this.badgeTextW[i] ?? 0;
+      fitText(name, `${p.name}${tags.length ? ` (${tags.join(", ")})` : ""}`, maxW);
+      // a small board leaves room for just the number
+      count.setText(`${p.resources} to place`);
+      if (maxW > 0 && count.width > maxW) count.setText(String(p.resources));
+      for (const o of [disc, letter, name, count]) o.setAlpha(p.captured_at === null ? 1 : 0.4);
     });
+  }
+
+  /**
+   * Each player's badge at their corner of the board, in the band above or below it: their initial on a disc in their
+   * colour (yours ringed in yellow), then their name and cells to place, reading in toward the middle.
+   */
+  private layoutBadges() {
+    const band = this.badgeBand;
+    const r = band / 2 - 4;
+    const { x, y, right, bottom } = this.view;
+    // a band shared by two badges gives each half its width; a badge alone in its band has all of it
+    const top = (c: number) => c < 2;
+    this.badgeTextW = this.corners.map((c) => {
+      const shared = this.corners.some((o) => o !== c && top(o) === top(c));
+      return (shared ? this.view.width / 2 : this.view.width - MARGIN) - MARGIN - r * 2 - 18;
+    });
+    this.badges.forEach(({ disc, letter, name, count }, i) => {
+      const corner = this.corners[i];
+      const left = corner === 0 || corner === 3;
+      const cx = left ? x + MARGIN + r : right - MARGIN - r;
+      const cy = top(corner) ? y - band / 2 : bottom + band / 2;
+      disc.clear().fillStyle(this.players[i].main_color).fillCircle(cx, cy, r);
+      disc.lineStyle(3, this.players[i] === this.human ? 0xffe03d : BADGE_RING).strokeCircle(cx, cy, r);
+      letter.setFontSize(Math.round(r * 1.1)).setPosition(cx, cy);
+      const tx = left ? cx + r + 10 : cx - r - 10;
+      name.setOrigin(left ? 0 : 1, 1).setPosition(tx, cy + 1);
+      count.setOrigin(left ? 0 : 1, 0).setPosition(tx, cy - 1);
+    });
+    this.updatePlayerTexts();
   }
 
   /** Set the zoom (clamped), keeping the board point under screen position (px, py) fixed. */
@@ -1077,8 +1356,9 @@ export default class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Board on the left, sidebar on the right. On narrow screens the sidebar drops below the board and
-   * compacts: zoom is just - and + beside Play and Stop, and the players sit in two columns.
+   * Board on the left, sidebar on the right, with the players' badges in bands above and below the board. On narrow
+   * screens the sidebar drops below the board and compacts: zoom is just - and + beside Play and Stop. The chat
+   * sits at the sidebar's foot and stays put; the controls above it scroll if they don't fit.
    */
   private layout({ width, height }: Phaser.Structs.Size) {
     let size: number, bx: number, by: number;
@@ -1087,32 +1367,35 @@ export default class GameScene extends Phaser.Scene {
     // wide enough for the mode's name beside Quit, in the display font
     const sw = wide ? Phaser.Math.Clamp(width * 0.24, 260, 320) : width - PAD * 2;
     const gap = 12;
-    const cols = wide ? 1 : 2;
-    const rowH = PLAYER_ROW_H;
-    const playersY = wide ? 290 : 188;
-    // the "To place" label, then the rows
-    const playersH = 26 + Math.ceil(this.players.length / cols) * rowH;
+    const band = (this.badgeBand = wide ? BADGE_BAND : BADGE_BAND_NARROW);
+    const patternsY = wide ? 284 : 180;
 
     // wrap first: a title that wraps pushes everything below it down. It leaves room for Rules and Quit.
     this.title.setWordWrapWidth(sw - 40 - ICON_BTN * 2 - ICON_GAP - 12);
     const extra = this.title.height - this.titleLineH;
+    // the sidebar has room for a reminder of the controls only beside the board
+    this.hint.setVisible(wide).setWordWrapWidth(sw - 40);
+    // from the sidebar's top to the bottom of the controls
+    const controlsH = extra + patternsY + BTN_H + (wide ? 16 + this.hint.height : 0) + 20;
 
     if (wide) {
       const areaW = width - sw - PAD * 3;
-      size = Math.min(areaW, height - PAD * 2);
+      size = Math.min(areaW, height - PAD * 2 - band * 2);
       bx = PAD + (areaW - size) / 2;
       by = (height - size) / 2;
       sx = width - PAD - sw;
       sy = PAD;
       sh = height - PAD * 2;
+      // on a short window the controls still keep some of the panel (and scroll)
+      this.chatH = Math.min(Math.max(CHAT_MIN_H, sh - controlsH), sh * 0.6);
     } else {
-      // the sidebar is tall enough for everything down to the players; the patterns scroll into view
-      sh = extra + playersY + playersH + 8;
-      size = Math.max(120, Math.min(width - PAD * 2, height - sh - PAD * 3));
+      this.chatH = CHAT_NARROW_H;
+      sh = controlsH + this.chatH;
+      size = Math.max(120, Math.min(width - PAD * 2, height - sh - PAD * 3 - band * 2));
       bx = (width - size) / 2;
-      by = PAD;
+      by = PAD + band;
       sx = PAD;
-      sy = by + size + PAD;
+      sy = by + size + band + PAD;
     }
 
     this.view.setTo(bx, by, size, size);
@@ -1133,7 +1416,7 @@ export default class GameScene extends Phaser.Scene {
     this.phaseText.setPosition(sx + 20, top + 82);
 
     this.zoomLabel.setVisible(wide);
-    this.syncZoomInput();
+    this.syncDom();
     if (wide) {
       // [Play] [Stop], then Zoom: [-] [ 150% ] [+]
       const btnW = (sw - 40 - gap) / 2;
@@ -1156,44 +1439,24 @@ export default class GameScene extends Phaser.Scene {
       layoutButton(this.zoomInButton, sx + sw - 20 - BTN_H, top + 116, BTN_H);
     }
 
-    // "To place", then per player: colour swatch, name, and their cells to place on the right
-    this.placeLabel.setPosition(sx + 20, top + playersY);
-    const colW = (sw - 40 - gap * (cols - 1)) / cols;
-    this.players.forEach((_, i) => {
-      const px = sx + 20 + (i % cols) * (colW + gap);
-      const py = top + playersY + 26 + Math.floor(i / cols) * rowH + rowH / 2;
-      this.playerSwatches[i].setPosition(px, py);
-      this.playerTexts[i].setPosition(px + PLAYER_SWATCH + 10, py);
-      this.playerCounts[i].setPosition(px + colW, py);
-    });
-    this.updatePlayerTexts();
+    layoutButton(this.patternsButton, sx + 20, top + patternsY, sw - 40);
+    this.hint.setPosition(sx + 20, top + patternsY + BTN_H + 16);
+    this.layoutBadges();
 
-    // the sidebar has room for a reminder of the controls only beside the board
-    this.hint.setVisible(wide).setWordWrapWidth(sw - 40).setPosition(sx + 20, top + playersY + playersH + 12);
-
-    // one of each basic kind of pattern, two to a row, under the hint (or the players, when narrow)
-    let y = wide ? this.hint.y + this.hint.height + 24 : top + playersY + playersH + 8;
-    this.patternsLabel.setPosition(sx + 20, y);
-    y += 26;
-    const itemW = (sw - 40 - gap) / 2;
-    this.patternDrawings.clear();
-    this.sidebarPatterns.forEach((p, i) => {
-      const px = sx + 20 + (i % 2) * (itemW + gap);
-      const py = y + Math.floor(i / 2) * (PATTERN_ITEM_H + gap);
-      drawPattern(this.patternDrawings, p.cells, p.color, px, py, itemW, PATTERN_DRAWING_H, 10);
-      this.patternNames[i].setPosition(px, py + PATTERN_DRAWING_H + 8);
-      this.patternKinds[i].setPosition(px, py + PATTERN_DRAWING_H + 28);
-    });
-    y += Math.ceil(this.sidebarPatterns.length / 2) * (PATTERN_ITEM_H + gap) - gap;
-    // the panel keeps its size; contents taller than it scroll inside it
-    this.sidebarView.setTo(sx, sy, sw, sh);
-    this.sidebarMaxScroll = Math.max(0, y + 20 - sy - sh);
-    this.sidebarCam.setViewport(sx, sy, sw, sh);
+    // the chat, pinned to the panel's foot
+    const chatTop = sy + sh - this.chatH;
+    this.chat.setPosition(sx + 20, chatTop);
+    Object.assign((this.chat.node as HTMLElement).style, { width: `${sw - 40}px`, height: `${this.chatH - 20}px` });
+    // the controls get the rest of the panel; whatever doesn't fit scrolls inside it
+    this.sidebarView.setTo(sx, sy, sw, chatTop - sy);
+    this.sidebarMaxScroll = Math.max(0, controlsH - (chatTop - sy));
+    this.sidebarCam.setViewport(sx, sy, sw, chatTop - sy);
     this.overlayCam.setViewport(0, 0, width, height);
     this.scrollSidebar(0);
 
     if (this.results) this.layoutResults({ width, height });
     if (this.rules) this.layoutRules({ width, height });
+    if (this.patterns) this.layoutPatterns({ width, height });
   }
 
   /** Results panel centred over the whole screen. */
@@ -1246,6 +1509,18 @@ export default class GameScene extends Phaser.Scene {
     }
     this.updatePhaseText();
   }
+}
+
+/** The first letter or digit of a name, capitalised; "?" if it has none. */
+function initial(name: string) {
+  return (name.match(/[\p{L}\p{N}]/u)?.[0] ?? "?").toUpperCase();
+}
+
+/** Set `text`, cut short with an ellipsis if it's wider than `maxW`. */
+function fitText(t: Phaser.GameObjects.Text, text: string, maxW: number) {
+  t.setText(text);
+  if (maxW <= 0) return;
+  for (let n = text.length - 1; t.width > maxW && n > 0; n--) t.setText(`${text.slice(0, n).trimEnd()}…`);
 }
 
 function readRulesSeen() {

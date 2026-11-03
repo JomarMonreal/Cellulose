@@ -54,14 +54,16 @@ src/
   config.ts                 # Phaser game config
   ui.ts                     # shared buttons and colours
   scenes/HomeScene.ts       # title screen
+  RankCard.ts               # the rank card (home and ranked screens), with players online and registered under it
   scenes/LobbyScene.ts      # colour and opponent picker
   scenes/OnlineLobbyScene.ts # create or join a room on the server
-  scenes/RankedScene.ts     # sign in, ratings, find a ranked match
+  scenes/RankedScene.ts     # ratings, rank card, find a ranked or classic match
+  scenes/LeaderboardScene.ts # top 50 ranked players per mode (from home or ranked), with your place
   modes.ts                  # the game modes
   net/Online.ts             # connection to the server (requests, sign-in, queue, latest lobby and game state)
   net/QueueBanner.ts        # "finding a match" strip shown on every screen while queued
   net/protocol.ts           # message types, copied from CelluloseServer
-  scenes/GameScene.ts       # board, UI, input, zoom, end-of-game results
+  scenes/GameScene.ts       # board, player badges at its corners, sidebar (patterns popup, room chat), input, zoom, results
   scenes/PlaygroundScene.ts # sandbox: draw, play, pause, speed up, clear
   scenes/TutorialScene.ts   # patterns by kind, drawn and explained
   Board.ts, Cell.ts         # Game of Life grid and territory

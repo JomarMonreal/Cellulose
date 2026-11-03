@@ -4,16 +4,19 @@ import type { Mode } from "../modes";
 import {
   applyDelta,
   type AuthReply,
+  type ChatMessage,
   type ClientToServerEvents,
   type GameAction,
   type GameState,
   type JoinReply,
+  type Leaderboard,
   type LobbyState,
   type MatchKind,
   type Profile,
   type QueueStatus,
   type RankedResult,
   type Result,
+  type ServerStats,
   type ServerToClientEvents,
   type Tier,
 } from "./protocol";
@@ -34,6 +37,8 @@ const GUEST_KEY = "cellulose:guest";
 const SYNC_EVERY_MS = 1_000;
 // still not connected after this long: the host is probably waking up from sleep
 const WAKE_HINT_MS = 4_000;
+// chat lines kept for the room we're in
+const CHAT_KEEP = 100;
 
 /** Ping the server as soon as the page loads, so a host that sleeps when idle starts waking before anyone clicks Play. */
 export function wakeServer() {
@@ -48,8 +53,9 @@ type TimedSocket = ReturnType<Socket<ServerToClientEvents, ClientToServerEvents>
  * The connection to the Cellulose server, shared by the online scenes (one per page). The server holds the
  * true board; this only sends requests and keeps the latest lobby, game state, sign-in and queue it reported.
  * Events: "status" (connected changed), "lobby", "state", "closed" (the room went away; reason as the argument),
- * "auth" (signed in or out, became or stopped being a guest, or the profile changed), "queue" (matchmaking queue status),
- * "ranked" (a ranked game's rating changes).
+ * "auth" (signed in or out, became or stopped being a guest, the profile changed, or the account signed in elsewhere), "queue" (matchmaking queue status),
+ * "ranked" (a ranked game's rating changes), "chat" (a new chat line as the argument, or none when the whole log
+ * changed), "stats" (players online and registered).
  */
 export default class Online extends Phaser.Events.EventEmitter {
   private static instance?: Online;
@@ -75,6 +81,14 @@ export default class Online extends Phaser.Events.EventEmitter {
   guest: string | null = sessionStorage.getItem(GUEST_KEY);
   tiers: Tier[] = [];
   queue: QueueStatus = null;
+  /** The room's chat, oldest first. */
+  chat: ChatMessage[] = [];
+  /** Players online and registered, while connected. */
+  stats: ServerStats | null = null;
+  /** Why we were signed out without asking (the account signed in elsewhere), for the sign-in screen to say once. */
+  signedOutBecause: string | null = null;
+  // the refresh token this tab saved: tabs share localStorage, so a newer tab's sign-in must not be thrown away here
+  private refreshToken: string | null = null;
   private token: string | null = null;
   // a ranked match was found; switch to it once its first state arrives
   private matchPending = false;
@@ -107,6 +121,8 @@ export default class Online extends Phaser.Events.EventEmitter {
     this.socket.on("disconnect", () => {
       // the server drops queued sockets, so we're not waiting any more
       this.setQueue(null);
+      this.stats = null;
+      this.emit("stats");
       this.startConnecting();
       this.emit("status");
     });
@@ -140,6 +156,30 @@ export default class Online extends Phaser.Events.EventEmitter {
       this.enter({ ok: true, ...m });
       this.matchPending = true;
       this.banner.matchFound();
+    });
+    this.socket.on("chat:history", ({ roomId, messages }) => {
+      if (roomId !== this.roomId) return;
+      this.chat = messages.slice(-CHAT_KEEP);
+      this.emit("chat");
+    });
+    this.socket.on("chat:message", (m) => {
+      if (m.roomId !== this.roomId) return;
+      this.chat.push(m);
+      if (this.chat.length > CHAT_KEEP) this.chat.shift();
+      this.emit("chat", m);
+    });
+    this.socket.on("server:stats", (stats) => {
+      this.stats = stats;
+      this.emit("stats");
+    });
+    // one session per account: signing in elsewhere signs this one out
+    this.socket.on("auth:kicked", ({ reason }) => {
+      this.profile = null;
+      if (load<{ refreshToken: string }>(localStorage, SESSION_KEY)?.refreshToken === this.refreshToken) localStorage.removeItem(SESSION_KEY);
+      this.refreshToken = null;
+      this.signedOutBecause = reason;
+      this.setQueue(null);
+      this.emit("auth");
     });
     this.socket.on("ranked:result", (result: RankedResult) => {
       this.emit("ranked", result);
@@ -239,6 +279,16 @@ export default class Online extends Phaser.Events.EventEmitter {
     return this.request((s) => s.emitWithAck("game:action", action));
   }
 
+  /** A mode's ranked leaderboard, with where we stand when signed in. */
+  leaderboard(mode: Mode) {
+    return this.request<Result<{ leaderboard: Leaderboard }>>((s) => s.emitWithAck("ranked:leaderboard", { mode }));
+  }
+
+  /** Say something to the room. It shows once the server sends it back to everyone. */
+  sendChat(text: string) {
+    return this.request((s) => s.emitWithAck("chat:send", { text }));
+  }
+
   async signup(username: string, password: string): Promise<Result> {
     return this.signedIn(await this.request<AuthReply>((s) => s.emitWithAck("auth:signup", { username, password })));
   }
@@ -250,6 +300,7 @@ export default class Online extends Phaser.Events.EventEmitter {
   async logout() {
     const r = await this.request((s) => s.emitWithAck("auth:logout"));
     this.profile = null;
+    this.refreshToken = null;
     localStorage.removeItem(SESSION_KEY);
     this.setQueue(null);
     this.emit("auth");
@@ -282,6 +333,8 @@ export default class Online extends Phaser.Events.EventEmitter {
   private signedIn(r: AuthReply, resuming = false): Result {
     if (r.ok) {
       [this.profile, this.tiers] = [r.profile, r.tiers];
+      this.refreshToken = r.session.refreshToken;
+      this.signedOutBecause = null;
       localStorage.setItem(SESSION_KEY, JSON.stringify({ refreshToken: r.session.refreshToken }));
       // a guest who signs in isn't a guest any more
       this.guest = null;
@@ -329,6 +382,7 @@ export default class Online extends Phaser.Events.EventEmitter {
     if (!r.ok) return r;
     [this.roomId, this.id, this.token] = [r.roomId, r.id, r.token];
     this.state = null;
+    this.chat = [];
     sessionStorage.setItem(SEAT_KEY, JSON.stringify({ roomId: r.roomId, id: r.id, token: r.token } satisfies Saved));
     return r;
   }
@@ -336,6 +390,7 @@ export default class Online extends Phaser.Events.EventEmitter {
   /** Drop everything about the room we were in; with a reason, tell the scenes it was taken from us. */
   private forget(reason?: string) {
     [this.roomId, this.id, this.token, this.lobby, this.state] = [null, null, null, null, null];
+    this.chat = [];
     sessionStorage.removeItem(SEAT_KEY);
     // a match that went away before it opened
     if (this.matchPending) {

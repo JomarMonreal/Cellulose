@@ -2,6 +2,7 @@ import * as Phaser from "phaser";
 import AuthScene from "./scenes/AuthScene";
 import GameScene from "./scenes/GameScene";
 import HomeScene from "./scenes/HomeScene";
+import LeaderboardScene from "./scenes/LeaderboardScene";
 import LobbyScene from "./scenes/LobbyScene";
 import OnlineLobbyScene from "./scenes/OnlineLobbyScene";
 import PlaygroundScene from "./scenes/PlaygroundScene";
@@ -27,6 +28,6 @@ export function createGameConfig(parent: HTMLElement): Phaser.Types.Core.GameCon
     // (e.g. React's dev-mode remount), tries to suspend/resume it once it's closed
     audio: { noAudio: true },
     // the first scene starts on boot: sign in before anything else
-    scene: [AuthScene, HomeScene, LobbyScene, OnlineLobbyScene, RankedScene, GameScene, PlaygroundScene, TutorialScene],
+    scene: [AuthScene, HomeScene, LobbyScene, OnlineLobbyScene, RankedScene, LeaderboardScene, GameScene, PlaygroundScene, TutorialScene],
   };
 }

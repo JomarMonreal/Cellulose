@@ -153,6 +153,33 @@ export type RankedResult = {
   results: { seat: number; username: string; place: number; before: number; after: number; tier: string }[];
 };
 
+/** A ranked player's line on a leaderboard. Equal ratings share a place. */
+export type LeaderboardEntry = { place: number; username: string; rating: number; tier: string; games: number; wins: number };
+
+export type Leaderboard = {
+  mode: Mode;
+  /** The best rated players who have played this mode, highest first. */
+  entries: LeaderboardEntry[];
+  /** You, when signed in and rated in this mode, whether or not you made the list. */
+  me: LeaderboardEntry | null;
+};
+
+/** One line of a room's chat. */
+export type ChatMessage = {
+  roomId: string;
+  /** The sender's public member id, as in the lobby. */
+  from: string;
+  name: string;
+  /** The sender's colour, an index into the palette like LobbyMember.color. */
+  color: number;
+  text: string;
+  /** Unix ms. */
+  at: number;
+};
+
+/** `online` counts open connections; `registered` is null on a server without accounts. */
+export type ServerStats = { online: number; registered: number | null };
+
 export interface ClientToServerEvents {
   "room:create": (req: { name: string; color?: number; bots?: number; mode?: Mode }, ack: (r: JoinReply) => void) => void;
   "room:join": (req: { roomId: string; name: string; color?: number }, ack: (r: JoinReply) => void) => void;
@@ -185,6 +212,11 @@ export interface ClientToServerEvents {
    */
   "match:queue": (req: { kind: MatchKind; mode: Mode; name?: string }, ack?: (r: Result) => void) => void;
   "match:cancel": (ack?: (r: Result) => void) => void;
+  /** The ranked leaderboard for a mode. Anyone may ask; `me` needs a sign-in. */
+  "ranked:leaderboard": (req: { mode: Mode }, ack: (r: Result<{ leaderboard: Leaderboard }>) => void) => void;
+
+  /** Say something to everyone in your room, in the lobby or in a game. */
+  "chat:send": (req: { text: string }, ack?: (r: Result) => void) => void;
 }
 
 export interface ServerToClientEvents {
@@ -200,4 +232,11 @@ export interface ServerToClientEvents {
   "match:found": (seat: { roomId: string; id: string; seat: number; token: string; kind: MatchKind; mode: Mode }) => void;
   /** Rating changes once a ranked game is over. */
   "ranked:result": (result: RankedResult) => void;
+  /** This connection was signed out because the same account signed in somewhere else. Forget the saved session. */
+  "auth:kicked": (info: { reason: string }) => void;
+  "chat:message": (message: ChatMessage) => void;
+  /** The room's recent chat, sent once you're in it (after a create, join or rejoin). */
+  "chat:history": (history: { roomId: string; messages: ChatMessage[] }) => void;
+  /** Sent on connecting, then again (at most every few seconds) when the numbers change. */
+  "server:stats": (stats: ServerStats) => void;
 }
