@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { playUi, type UiSound } from "./sound";
 
 export const BTN_H = 52;
 export const PANEL_COLOR = 0x1c1633;
@@ -101,14 +102,21 @@ export function displayFont() {
   return getComputedStyle(document.documentElement).getPropertyValue("--font-display").trim();
 }
 
-export function makeButton(scene: Phaser.Scene, text: string, style: ButtonStyle, onClick: () => void): Button {
+/**
+ * A button that plays `sound` when clicked: the select sound, unless it makes its own (e.g. a confirmation as a game
+ * starts), in which case pass null.
+ */
+export function makeButton(scene: Phaser.Scene, text: string, style: ButtonStyle, onClick: () => void, sound: UiSound | null = "select"): Button {
   const rect = scene.add.rectangle(0, 0, 1, 1, style.fill).setOrigin(0).setInteractive({ useHandCursor: true });
   const label = scene.add.text(0, 0, text, { fontFamily: displayFont(), fontSize: "20px", fontStyle: "bold", color: style.text }).setOrigin(0.5);
   const button = { rect, label, style };
   // read the style through the button so setButtonStyle also changes the hover colours
   rect.on("pointerover", () => rect.setFillStyle(button.style.hover));
   rect.on("pointerout", () => rect.setFillStyle(button.style.fill));
-  rect.on("pointerdown", onClick);
+  rect.on("pointerdown", () => {
+    if (sound) playUi(scene, sound);
+    onClick();
+  });
   return button;
 }
 

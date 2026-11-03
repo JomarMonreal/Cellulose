@@ -3,6 +3,7 @@ import { type Mode, MODES } from "../modes";
 import Online from "../net/Online";
 import type { MatchKind } from "../net/protocol";
 import RankCard from "../RankCard";
+import { playUi } from "../sound";
 import {
   BTN_H,
   type Button,
@@ -119,7 +120,8 @@ export default class RankedScene extends Phaser.Scene {
     this.modeLabel = this.add.text(0, 0, "Mode", labelStyle);
     this.modeButtons = MODES.map((m) => makeButton(this, m.name, SECONDARY, () => this.pickMode(m.id)));
     for (const b of this.modeButtons) b.label.setFontSize(17);
-    this.findButton = makeButton(this, "Find match", PRIMARY, () => this.toggleQueue());
+    // its own sound: a confirmation to start looking, a plain select to stop
+    this.findButton = makeButton(this, "Find match", PRIMARY, () => this.toggleQueue(), null);
     this.queueText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "15px", fontStyle: "bold", color: "#ffe03d" });
     this.queueSpinner = makeSpinner(this, SPINNER_SIZE, 0xffe03d);
     this.botsButton = makeButton(this, "Play with bots while you wait", SECONDARY, () =>
@@ -156,6 +158,7 @@ export default class RankedScene extends Phaser.Scene {
   }
 
   private toggleQueue() {
+    if (!this.busy) playUi(this, this.online.queue ? "select" : "confirm");
     this.send(() => (this.online.queue ? this.online.cancelQueue() : this.online.findMatch(this.kind, this.mode)), this.findButton);
   }
 

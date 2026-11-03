@@ -64,7 +64,8 @@ export default class LobbyScene extends Phaser.Scene {
     );
     this.matchup = this.add.text(0, 0, "", { fontFamily: font, fontSize: "15px", color: "#f8f5ff", lineSpacing: 4 });
     this.backButton = makeButton(this, "Back", SECONDARY, () => this.scene.start("HomeScene"));
-    this.startButton = makeButton(this, "Start", PRIMARY, () => this.scene.start("GameScene", { ...this.settings }));
+    // silent: the game starting plays the confirmation
+    this.startButton = makeButton(this, "Start", PRIMARY, () => this.scene.start("GameScene", { ...this.settings }), null);
 
     this.refresh();
     this.layout(this.scale.gameSize);

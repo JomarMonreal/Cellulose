@@ -129,7 +129,8 @@ export default class OnlineLobbyScene extends Phaser.Scene {
       makeButton(this, `${n}`, SECONDARY, () => this.send(() => this.online.setBots(n), this.botButtons[n])),
     );
     this.leaveButton = makeButton(this, "Leave", SECONDARY, () => this.send(() => this.online.leave(), this.leaveButton));
-    this.startButton = makeButton(this, "Start", PRIMARY, () => this.online.me?.host && this.send(() => this.online.start(), this.startButton));
+    // silent: the game starting plays the confirmation, for everyone in the room
+    this.startButton = makeButton(this, "Start", PRIMARY, () => this.online.me?.host && this.send(() => this.online.start(), this.startButton), null);
 
     // the server pushes changes; redraw on each, and hand over to the game once it starts
     const onState = () => this.online.lobby?.status === "playing" && this.scene.start("GameScene", { online: true });

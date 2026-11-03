@@ -7,7 +7,7 @@ import Online from "../net/Online";
 import type { GameAction, GameState, LobbyState, RankedResult } from "../net/protocol";
 import { GUIDE } from "../patterns";
 import Player, { PALETTE } from "../Player";
-import { isMuted, loadSounds, popForBirths, popForPlace, setMuted } from "../sound";
+import { isMuted, loadSounds, playUi, popForBirths, popForPlace, setMuted } from "../sound";
 import {
   BTN_H,
   type Button,
@@ -93,6 +93,10 @@ const MUTED_KEY = "cellulose:muted";
 const CHAT_OFF_KEY = "cellulose:chatOff";
 // the results panel draws over everything else
 const RESULTS_DEPTH = 10;
+// the results: the crowned winner's disc, the land bars, and the medals for 1st, 2nd and 3rd
+const CROWN_R = 30;
+const RESULT_BAR_H = 8;
+const MEDALS = [0xffd23d, 0xc9cbe0, 0xd98c4a];
 // how long a notice (a refused request, a click that can't place) replaces the phase text
 export const NOTICE_MS = 2_000;
 // the placement timer turns red for its last few seconds
@@ -117,12 +121,40 @@ export type GameSettings = {
 /** Online games are set up in OnlineLobbyScene; everything else comes from the server. */
 export type OnlineSettings = { online: true };
 
+/** One player's line on the results: place medal, their disc and initial, name, land bar, and a note. */
+type ResultRow = {
+  player: Player;
+  // yours is highlighted
+  bg: Phaser.GameObjects.Rectangle;
+  // the medal and the player's disc
+  marks: Phaser.GameObjects.Graphics;
+  place: Phaser.GameObjects.Text;
+  initial: Phaser.GameObjects.Text;
+  name: Phaser.GameObjects.Text;
+  land: Phaser.GameObjects.Text;
+  // a rating change (ranked) or when their flag fell (ctf)
+  note: Phaser.GameObjects.Text;
+  // where the land bar goes, set by the layout
+  bar: { x: number; y: number; w: number };
+};
+
 type Results = {
   shade: Phaser.GameObjects.Rectangle;
   panel: Phaser.GameObjects.Rectangle;
+  // the winner's disc, crowned, at the top
+  crown: Phaser.GameObjects.Graphics;
+  crownInitial: Phaser.GameObjects.Text;
   title: Phaser.GameObjects.Text;
-  standings: Phaser.GameObjects.Text;
+  subtitle: Phaser.GameObjects.Text;
+  rows: ResultRow[];
+  bars: Phaser.GameObjects.Graphics;
+  // "Updating ratings…" in a ranked game, until they're in
+  footer: Phaser.GameObjects.Text;
   button: Button;
+  // the land bars grow in: 0 to 1
+  grow: { p: number };
+  // the winner's colour, for the crown's disc
+  winnerColor: number;
 };
 
 type Rules = {
@@ -255,6 +287,8 @@ export default class GameScene extends Phaser.Scene {
    * simulated here, and each state it broadcasts replaces ours.
    */
   private online!: Online | null;
+  // online: a state from the server has been shown, so changes from here on are news (a capture to sound)
+  private stateSeen!: boolean;
   // our seat on the server's board
   private seat!: number;
   // why the server refused our last request, shown for NOTICE_MS
@@ -274,6 +308,7 @@ export default class GameScene extends Phaser.Scene {
   /** Phaser reuses the scene object for every game, so all per-game state starts here rather than in field initializers. */
   init(settings: GameSettings | OnlineSettings) {
     this.online = "online" in settings ? Online.get() : null;
+    this.stateSeen = false;
     if (!this.online) this.settings = settings as GameSettings;
     this.mode = this.online ? (this.online.state?.mode ?? "strongest500") : this.settings.mode;
     this.flags = new Map();
@@ -326,6 +361,8 @@ export default class GameScene extends Phaser.Scene {
       this.scene.start("OnlineLobbyScene");
       return;
     }
+    // the game is starting (from a lobby, a found match, or the host's next game)
+    if (state?.phase !== "over") playUi(this, "confirm");
 
     this.graphics = this.add.graphics();
     this.flagGraphics = this.add.graphics();
@@ -535,10 +572,16 @@ export default class GameScene extends Phaser.Scene {
         c.territory = at(s.territory, i);
       }),
     );
+    // a flag newly taken scratches; on the first state (a rejoin mid-game, say) every capture is old news
+    let captured = false;
     for (const p of s.players) {
-      this.players[p.seat].resources = p.resources;
-      this.players[p.seat].captured_at = p.capturedAt;
+      const player = this.players[p.seat];
+      if (player.captured_at === null && p.capturedAt !== null && this.stateSeen) captured = true;
+      player.resources = p.resources;
+      player.captured_at = p.capturedAt;
     }
+    this.stateSeen = true;
+    if (captured) playUi(this, "capture");
     popForBirths(this, births);
     this.generation = s.generation;
     this.phaseLeft = s.phaseLeftMs;
@@ -591,6 +634,7 @@ export default class GameScene extends Phaser.Scene {
     for (const [p, flag] of this.flags) {
       if (p.captured_at !== null || flag.territory === p) continue;
       p.captured_at = this.generation;
+      playUi(this, "capture");
       p.resources = 0;
       for (const row of this.board.cells) for (const c of row) if (c.owner === p) [c.is_alive, c.owner] = [false, null];
     }
@@ -753,45 +797,155 @@ export default class GameScene extends Phaser.Scene {
     this.hoverGraphics.clear();
     this.input.setDefaultCursor("default");
 
-    const winners = this.placements().filter((r) => r.place === 1).map((r) => r.player);
+    const placements = this.placements();
+    const winners = placements.filter((r) => r.place === 1).map((r) => r.player);
+    const won = winners.includes(this.human);
     let headline: string;
-    if (winners.length > 1) headline = winners.includes(this.human) ? "It's a draw!" : "No winner: a draw";
-    else headline = winners[0] === this.human ? "You win!" : `${winners[0].name} wins`;
+    if (winners.length > 1) headline = won ? "It's a draw!" : "No winner: a draw";
+    else headline = won ? "You win!" : `${winners[0].name} wins`;
+    const mine = placements.find((r) => r.player === this.human)!;
+    const subtitle = `${won && winners.length === 1 ? "1st" : ordinal(mine.place)} of ${this.players.length} · ${modeName(this.mode)}`;
 
     const font = fontFamily();
     const display = displayFont();
     const back = this.roomKind === "ranked" ? "Back to ranked" : this.roomKind === "classic" ? "Back to classic" : "Back to lobby";
+    const rows = placements.map(({ player }) => ({
+      player,
+      bg: this.add.rectangle(0, 0, 1, 1, 0x2b2448).setOrigin(0).setVisible(player === this.human),
+      marks: this.add.graphics(),
+      place: this.add.text(0, 0, "", { fontFamily: display, fontSize: "16px", color: "#120e22" }).setOrigin(0.5),
+      initial: this.add
+        .text(0, 0, initial(this.realName(this.players.indexOf(player))), { fontFamily: display, fontSize: "16px", color: "#120e22" })
+        .setOrigin(0.5),
+      name: this.add.text(0, 0, player.name, { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#f8f5ff" }),
+      land: this.add.text(0, 0, "", { fontFamily: display, fontSize: "16px", color: "#f8f5ff" }).setOrigin(1, 0),
+      note: this.add.text(0, 0, "", { fontFamily: font, fontSize: "13px", fontStyle: "bold", color: "#9a8ae0" }),
+      bar: { x: 0, y: 0, w: 0 },
+    }));
     const results: Results = {
       // interactive so it catches clicks meant for the sidebar buttons underneath
-      shade: this.add.rectangle(0, 0, 1, 1, 0x120e22, 0.75).setOrigin(0).setInteractive(),
+      shade: this.add.rectangle(0, 0, 1, 1, 0x120e22, 0.8).setOrigin(0).setInteractive(),
       panel: this.add.rectangle(0, 0, 1, 1, PANEL_COLOR).setOrigin(0),
-      title: this.add.text(0, 0, headline, { fontFamily: display, fontSize: "32px", fontStyle: "bold", color: "#ffe03d", align: "center" }).setOrigin(0.5, 0),
-      standings: this.add.text(0, 0, "", { fontFamily: font, fontSize: "18px", color: "#f8f5ff", lineSpacing: 8 }).setOrigin(0.5, 0),
+      crown: this.add.graphics(),
+      crownInitial: this.add
+        .text(0, 0, initial(this.realName(this.players.indexOf(winners[0]))), { fontFamily: display, fontSize: "30px", color: "#120e22" })
+        .setOrigin(0.5)
+        .setVisible(winners.length === 1),
+      title: this.add
+        .text(0, 0, headline, { fontFamily: display, fontSize: "36px", fontStyle: "bold", color: won ? "#ffe03d" : "#f8f5ff", align: "center" })
+        .setOrigin(0.5, 0),
+      subtitle: this.add.text(0, 0, subtitle, { fontFamily: font, fontSize: "15px", fontStyle: "bold", color: "#d4ccff", align: "center" }).setOrigin(0.5, 0),
+      rows,
+      bars: this.add.graphics(),
+      footer: this.add.text(0, 0, "", { fontFamily: font, fontSize: "14px", color: "#d4ccff", align: "center" }).setOrigin(0.5, 0),
       button: makeButton(this, back, PRIMARY, () => this.toLobby()),
+      grow: { p: 0 },
+      winnerColor: winners.length === 1 ? winners[0].main_color : 0xffe03d,
     };
-    for (const o of [results.shade, results.panel, results.title, results.standings]) o.setDepth(RESULTS_DEPTH);
-    setButtonDepth(results.button, RESULTS_DEPTH);
+    const contents = [results.crown, results.crownInitial, results.title, results.subtitle, results.bars, results.footer, ...rows.flatMap(rowObjects)];
+    results.shade.setDepth(RESULTS_DEPTH);
+    results.panel.setDepth(RESULTS_DEPTH + 2);
+    for (const o of contents) o.setDepth(RESULTS_DEPTH + 3);
+    setButtonDepth(results.button, RESULTS_DEPTH + 3);
     this.results = results;
-    this.showOnTop([results.shade, results.panel, results.title, results.standings, results.button.rect, results.button.label]);
+    this.showOnTop([results.shade, results.panel, ...contents, results.button.rect, results.button.label]);
     this.syncDom();
     this.showStandings();
+    this.animateResults(won && winners.length === 1);
   }
 
-  /** One line per player: place, land, a ctf capture, and in ranked games the rating change once it's in. */
+  /** Each row's numbers: land, and a ctf capture or (ranked, once it's in) the rating change. */
   private showStandings() {
-    const lines = this.placements().map(({ player, land, place }) => {
-      let line = `${place}.  ${player.name}: ${land} land`;
-      if (this.mode === "ctf" && player.captured_at !== null) line += ` · captured at gen ${player.captured_at}`;
-      const rated = this.rankedResult?.results.find((r) => this.players[r.seat] === player);
+    const r = this.results!;
+    for (const row of r.rows) {
+      const { player } = row;
+      const placed = this.placements().find((p) => p.player === player)!;
+      row.place.setText(String(placed.place));
+      row.land.setText(`${placed.land} land`);
+      const notes: string[] = [];
+      let color = "#9a8ae0";
+      const rated = this.rankedResult?.results.find((x) => this.players[x.seat] === player);
       if (rated) {
         const delta = rated.after - rated.before;
-        line += `\n      ${rated.after} (${delta >= 0 ? "+" : ""}${delta}) · ${rated.tier}`;
+        notes.push(`${delta >= 0 ? "+" : ""}${delta} → ${rated.after} · ${rated.tier}`);
+        color = delta > 0 ? "#3ddc84" : delta < 0 ? "#ff4d5e" : "#d4ccff";
       }
-      return line;
-    });
-    if (this.roomKind === "ranked" && !this.rankedResult) lines.push("", "Updating ratings…");
-    this.results!.standings.setText(lines.join("\n"));
+      if (this.mode === "ctf" && player.captured_at !== null) notes.push(`flag taken at gen ${player.captured_at}`);
+      row.note.setText(notes.join(" · ")).setColor(color);
+    }
+    r.footer.setText(this.roomKind === "ranked" && !this.rankedResult ? "Updating ratings…" : "");
     this.layoutResults(this.scale.gameSize);
+  }
+
+  /**
+   * The results arrive: the panel rises in, the rows follow one by one, and the land bars grow. A win rains live
+   * cells in every player's colour behind the panel.
+   */
+  private animateResults(celebrate: boolean) {
+    const r = this.results!;
+    const head = [r.panel, r.crown, r.crownInitial, r.title, r.subtitle, r.bars, r.footer, r.button.rect, r.button.label];
+    for (const o of head) {
+      const y = o.y;
+      o.setAlpha(0).setY(y + 24);
+      this.tweens.add({ targets: o, alpha: 1, y, duration: 350, ease: "Back.Out" });
+    }
+    r.rows.forEach((row, i) => {
+      for (const o of rowObjects(row)) {
+        const x = o.x;
+        o.setAlpha(0).setX(x - 30);
+        this.tweens.add({ targets: o, alpha: 1, x, duration: 300, delay: 250 + i * 120, ease: "Cubic.Out" });
+      }
+    });
+    this.tweens.add({
+      targets: r.grow,
+      p: 1,
+      duration: 900,
+      delay: 300 + r.rows.length * 120,
+      ease: "Cubic.Out",
+      onUpdate: () => this.drawResultBars(),
+    });
+    if (celebrate) {
+      playUi(this, "confirm");
+      this.rainCells();
+    }
+  }
+
+  /** A shower of live cells, in the players' colours and yellow, falling past the panel and gone in a few seconds. */
+  private rainCells() {
+    const { width, height } = this.scale.gameSize;
+    const colors = [...this.players.map((p) => p.main_color), 0xffe03d];
+    const cells: Phaser.GameObjects.Rectangle[] = [];
+    for (let i = 0; i < 90; i++) {
+      const size = Phaser.Math.Between(6, 12);
+      const cell = this.add
+        .rectangle(Phaser.Math.Between(0, width), -Phaser.Math.Between(10, height * 0.6), size, size, Phaser.Utils.Array.GetRandom(colors))
+        .setDepth(RESULTS_DEPTH + 1)
+        .setAngle(Phaser.Math.Between(0, 90));
+      cells.push(cell);
+      this.tweens.add({
+        targets: cell,
+        y: height + 20,
+        x: cell.x + Phaser.Math.Between(-80, 80),
+        angle: cell.angle + Phaser.Math.Between(-360, 360),
+        duration: Phaser.Math.Between(2200, 4200),
+        delay: Phaser.Math.Between(0, 900),
+        ease: "Quad.In",
+        onComplete: () => cell.destroy(),
+      });
+    }
+    this.showOnTop(cells);
+  }
+
+  /** The land bars, each in its player's colour, as long as their land against the leader's. */
+  private drawResultBars() {
+    const r = this.results!;
+    const g = r.bars.clear();
+    const most = Math.max(1, ...r.rows.map(({ player }) => this.board.territoryOf(player)));
+    for (const { player, bar } of r.rows) {
+      g.fillStyle(0x120e22).fillRect(bar.x, bar.y, bar.w, RESULT_BAR_H);
+      const w = Math.round(bar.w * (this.board.territoryOf(player) / most) * r.grow.p);
+      if (w > 0) g.fillStyle(player.main_color).fillRect(bar.x, bar.y, w, RESULT_BAR_H);
+    }
   }
 
   /** Every player still in earns ROUND_RESOURCES cells plus floor(cbrt(territory gained since the last grant)). */
@@ -1570,21 +1724,84 @@ export default class GameScene extends Phaser.Scene {
     if (this.patterns) this.layoutPatterns({ width, height });
   }
 
-  /** Results panel centred over the whole screen. */
+  /** Results panel centred over the whole screen: the crowned winner, the headline, then a row per player. */
   private layoutResults({ width, height }: { width: number; height: number }) {
     const r = this.results!;
-    const pw = Math.min(420, width - PAD * 2);
+    const pw = Math.min(520, width - PAD * 2);
+    const inner = pw - 48;
     // wrap before measuring, so a long headline makes the panel taller
-    r.title.setWordWrapWidth(pw - 40);
-    const ph = 40 + r.title.height + 24 + r.standings.height + 32 + BTN_H + 32;
+    r.title.setWordWrapWidth(inner);
+    r.subtitle.setWordWrapWidth(inner);
+    const crownH = r.crownInitial.visible ? CROWN_R * 2 + 26 : 0;
+    const rowH = (row: ResultRow) => 52 + (row.note.text ? 18 : 0);
+    const rowsH = r.rows.reduce((h, row) => h + rowH(row) + 6, 0) - 6;
+    const footerH = r.footer.text ? r.footer.height + 12 : 0;
+    const ph = 28 + crownH + r.title.height + 6 + r.subtitle.height + 22 + rowsH + 20 + footerH + BTN_H + 28;
     const px = (width - pw) / 2;
     const py = Math.max(PAD, (height - ph) / 2);
+    const cx = width / 2;
     r.shade.setSize(width, height);
     (r.shade.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, width, height);
-    r.panel.setPosition(px, py).setSize(pw, ph);
-    r.title.setPosition(width / 2, py + 40);
-    r.standings.setPosition(width / 2, py + 40 + r.title.height + 24);
-    layoutButton(r.button, px + 32, py + ph - 32 - BTN_H, pw - 64);
+    r.panel.setPosition(px, py).setSize(pw, ph).setStrokeStyle(3, r.winnerColor);
+
+    let y = py + 28;
+    // the winner's disc with a crown over it
+    r.crown.clear();
+    if (r.crownInitial.visible) {
+      const dy = y + 22 + CROWN_R;
+      for (let i = 3; i >= 1; i--) r.crown.fillStyle(r.winnerColor, 0.12).fillCircle(cx, dy, CROWN_R * (1 + i * 0.12));
+      r.crown.fillStyle(r.winnerColor).fillCircle(cx, dy, CROWN_R).lineStyle(3, 0xffe03d).strokeCircle(cx, dy, CROWN_R);
+      const top = dy - CROWN_R - 4;
+      const crown = [
+        [cx - 20, top],
+        [cx - 22, top - 18],
+        [cx - 9, top - 8],
+        [cx, top - 24],
+        [cx + 9, top - 8],
+        [cx + 22, top - 18],
+        [cx + 20, top],
+      ].map(([px2, py2]) => new Phaser.Math.Vector2(px2, py2));
+      r.crown.fillStyle(0xffe03d).fillPoints(crown, true);
+      r.crownInitial.setPosition(cx, dy);
+      y += crownH;
+    }
+    r.title.setPosition(cx, y);
+    y += r.title.height + 6;
+    r.subtitle.setPosition(cx, y);
+    y += r.subtitle.height + 22;
+
+    const x = px + 24;
+    for (const row of r.rows) {
+      const h = rowH(row);
+      row.bg.setPosition(x - 8, y).setSize(inner + 16, h);
+      const my = y + 26;
+      // the place: a gold, silver or bronze medal, or a plain ring
+      const medal = MEDALS[Number(row.place.text) - 1];
+      const g = row.marks.clear();
+      if (medal !== undefined) g.fillStyle(medal).fillCircle(x + 16, my, 15);
+      else g.lineStyle(2, 0x5b4b9a).strokeCircle(x + 16, my, 14);
+      row.place.setPosition(x + 16, my).setColor(medal !== undefined ? "#120e22" : "#d4ccff");
+      // the player's disc, as on the board
+      g.fillStyle(row.player.main_color).fillCircle(x + 54, my, 16);
+      if (row.player === this.human) g.lineStyle(2, 0xffe03d).strokeCircle(x + 54, my, 16);
+      row.initial.setPosition(x + 54, my);
+      // name and land on a line, the bar under them, then the note
+      const tx = x + 82;
+      const right = x + inner;
+      row.land.setPosition(right, y + 8);
+      // a long name gets an ellipsis before it reaches the land
+      fitText(row.name.setPosition(tx, y + 8), row.player.name, right - tx - row.land.width - 12);
+      row.bar = { x: tx, y: y + 34, w: right - tx };
+      row.note.setPosition(tx, y + 48);
+      y += h + 6;
+    }
+    this.drawResultBars();
+    y += 14;
+    if (r.footer.text) {
+      r.footer.setPosition(cx, y);
+      y += r.footer.height + 12;
+    }
+    layoutButton(r.button, px + 24, py + ph - 28 - BTN_H, inner);
   }
 
   /** Counts down setup/placement phases and lets the AIs place their cells over time. */
@@ -1644,6 +1861,16 @@ function store(key: string, value: unknown) {
   } catch {
     // storage is blocked (some private modes): the setting just isn't kept
   }
+}
+
+/** 1st, 2nd, 3rd, 4th. */
+function ordinal(n: number) {
+  return `${n}${["th", "st", "nd", "rd"][n % 100 > 10 && n % 100 < 14 ? 0 : Math.min(n % 10, 4) % 4] ?? "th"}`;
+}
+
+/** A results row's objects, for depth, cameras and the entrance. */
+function rowObjects(row: ResultRow): (Phaser.GameObjects.Rectangle | Phaser.GameObjects.Graphics | Phaser.GameObjects.Text)[] {
+  return [row.bg, row.marks, row.place, row.initial, row.name, row.land, row.note];
 }
 
 /** The first letter or digit of a name, capitalised; "?" if it has none. */

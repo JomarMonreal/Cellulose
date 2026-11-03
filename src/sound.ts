@@ -17,6 +17,17 @@ const PLACE_GAP_MS = 40;
 let lastPop = 0;
 let lastPlacePop = 0;
 
+/**
+ * One-off sounds, from Kenney's Interface Sounds (CC0): select when a button is clicked, confirmation when you look
+ * for a match or a game starts, and a scratch when a flag is captured. Ogg with an MP3 copy, for browsers without Ogg.
+ */
+export type UiSound = "select" | "confirm" | "capture";
+const UI_SOUNDS: Record<UiSound, { key: string; file: string; volume: number }> = {
+  select: { key: "ui-select", file: "select_006", volume: 0.4 },
+  confirm: { key: "ui-confirm", file: "confirmation_001", volume: 0.5 },
+  capture: { key: "fx-capture", file: "scratch_004", volume: 0.6 },
+};
+
 /** Music: bass_background behind the menus, the playground and the tutorial; gameplay while a game is on. */
 export type Track = "menu" | "game";
 const TRACKS: Record<Track, { key: string; file: string }> = {
@@ -80,6 +91,26 @@ export function setMuted(on: boolean) {
 /** Queue the pop, unless an earlier scene already has it. The browser picks whichever format it can play. */
 export function loadSounds(scene: Phaser.Scene) {
   if (!scene.cache.audio.exists(POP)) scene.load.audio(POP, ["pop.ogg", "pop.mp3"]);
+}
+
+/**
+ * Queue every sound effect a scene hasn't loaded yet, and start loading if nothing else will. Called as each screen
+ * opens (main.ts), so they arrive in the background on the first screen instead of holding it up.
+ */
+export function loadEffects(scene: Phaser.Scene) {
+  loadSounds(scene);
+  for (const { key, file } of Object.values(UI_SOUNDS)) {
+    if (!scene.cache.audio.exists(key)) scene.load.audio(key, [`${file}.ogg`, `${file}.mp3`]);
+  }
+  if (scene.load.list.size > 0 && !scene.load.isLoading()) scene.load.start();
+}
+
+/** A button's click, or a confirmation. Silent until loaded (they're tiny, so that's only the first moment). */
+export function playUi(scene: Phaser.Scene, which: UiSound) {
+  const { key, volume } = UI_SOUNDS[which];
+  const v = volume * sfxVolume;
+  if (muted || v <= 0 || !scene.cache.audio.exists(key)) return;
+  scene.sound.play(key, { volume: v });
 }
 
 function pop(scene: Phaser.Scene, volume: number) {
