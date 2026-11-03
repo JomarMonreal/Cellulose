@@ -160,9 +160,13 @@ export default class LeaderboardScene extends Phaser.Scene {
     let status: string;
     if (this.error) status = this.error;
     else if (!board) status = this.online.connectionStatus ?? "Loading…";
-    else if (!board.entries.length) status = "Nobody has played a ranked game in this mode yet.";
+    else if (!board.entries.length) status = `Nobody has played ${board.minGames} ranked game${board.minGames === 1 ? "" : "s"} in this mode yet.`;
     else if (board.me) status = `You're #${board.me.place} with ${board.me.rating}.`;
-    else status = this.online.profile ? "Play a ranked game in this mode to get on the board." : "Sign in and play ranked to get on the board.";
+    else if (!this.online.profile) status = "Sign in and play ranked to get on the board.";
+    else {
+      const left = board.minGames - this.online.profile.games[this.mode];
+      status = `Play ${left} more ranked game${left === 1 ? "" : "s"} in this mode to get on the board.`;
+    }
     this.status.setText(status).setColor(this.error ? "#ff4d5e" : "#d4ccff");
     this.spinner.setVisible(busy);
 

@@ -130,7 +130,8 @@ export function applyDelta(state: GameState, delta: GameDelta): GameState | null
   };
 }
 
-export type Session = { accessToken: string; refreshToken: string; /** Unix seconds. */ expiresAt: number };
+/** What the client keeps to sign back in through the server. Supabase's access token never leaves the server. */
+export type Session = { refreshToken: string; /** Unix seconds. */ expiresAt: number };
 
 /** A rank tier, e.g. Species from 0, Genus from 1100. */
 export type Tier = { name: string; minRating: number };
@@ -160,8 +161,10 @@ export type Leaderboard = {
   mode: Mode;
   /** The best rated players who have played this mode, highest first. */
   entries: LeaderboardEntry[];
-  /** You, when signed in and rated in this mode, whether or not you made the list. */
+  /** You, when signed in and on the board (enough games), whether or not you made the top of it. */
   me: LeaderboardEntry | null;
+  /** Games a player needs in this mode to be on the board. */
+  minGames: number;
 };
 
 /** One line of a room's chat. */
@@ -203,7 +206,12 @@ export interface ClientToServerEvents {
   "auth:login": (req: { username: string; password: string }, ack: (r: AuthReply) => void) => void;
   /** Sign in again with a saved refresh token, e.g. after a page reload. Replies with a fresh session. */
   "auth:resume": (req: { refreshToken: string }, ack: (r: AuthReply) => void) => void;
+  /** Sign out here, ending this session for good (its saved sign-in won't work again). */
   "auth:logout": (ack?: (r: Result) => void) => void;
+  /** Sign out on every device, this one too. */
+  "auth:logoutAll": (ack?: (r: Result) => void) => void;
+  /** Change the password: every other device is signed out, and this connection gets a fresh session. */
+  "auth:password": (req: { current: string; next: string }, ack: (r: AuthReply) => void) => void;
   "auth:profile": (ack: (r: Result<{ profile: Profile }>) => void) => void;
 
   /**

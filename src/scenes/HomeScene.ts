@@ -38,6 +38,8 @@ export default class HomeScene extends Phaser.Scene {
   private blurb!: Phaser.GameObjects.Text;
   private account!: Phaser.GameObjects.Text;
   private logout!: Phaser.GameObjects.Text;
+  // signed in only: password and sign out everywhere
+  private accountLink!: Phaser.GameObjects.Text;
 
   private card!: RankCard;
 
@@ -70,6 +72,14 @@ export default class HomeScene extends Phaser.Scene {
         this.logout.setText("Logging out…").disableInteractive();
         void online.logout();
       });
+    this.accountLink = this.add
+      .text(0, 0, "Account", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
+      .setOrigin(1, 0)
+      .setVisible(!guest)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => this.accountLink.setColor("#ffe03d"))
+      .on("pointerout", () => this.accountLink.setColor("#d4ccff"))
+      .on("pointerdown", () => this.scene.start("AccountScene"));
     // a fresher profile (after a ranked game, say) redraws the rank
     const onAuth = () => (online.player ? this.refreshRank() : this.scene.start("AuthScene"));
     online.on("auth", onAuth);
@@ -145,9 +155,13 @@ export default class HomeScene extends Phaser.Scene {
     const cardNeed = this.card.measure(cardW, wide);
     const footH = this.card.footH;
 
-    this.account.setPosition(PAD, PAD);
     this.logout.setPosition(width - PAD, PAD);
-    const top = PAD + this.account.height + 16;
+    this.accountLink.setPosition(width - PAD - this.logout.width - 24, PAD);
+    // who's signed in sits left of the links, or under them when the screen's too narrow for both
+    const linksLeft = this.accountLink.visible ? this.accountLink.x - this.accountLink.width : this.logout.x - this.logout.width;
+    const crowded = PAD + this.account.width + 16 > linksLeft;
+    this.account.setPosition(PAD, crowded ? PAD + this.logout.height + 8 : PAD);
+    const top = this.account.y + this.account.height + 16;
 
     if (wide) {
       const cardH = Math.max(columnH, cardNeed);

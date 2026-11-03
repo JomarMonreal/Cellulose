@@ -37,6 +37,8 @@ const GUEST_KEY = "cellulose:guest";
 const SYNC_EVERY_MS = 1_000;
 // still not connected after this long: the host is probably waking up from sleep
 const WAKE_HINT_MS = 4_000;
+// after the server turns the connection away, try again this much later
+const REFUSED_RETRY_MS = 60_000;
 // chat lines kept for the room we're in
 const CHAT_KEEP = 100;
 
@@ -97,6 +99,8 @@ export default class Online extends Phaser.Events.EventEmitter {
   private connectingSince = Date.now();
   private wakeHint = 0;
   private lastSync = 0;
+  // the server turned the connection away (e.g. too many from this network), and why
+  private refusedBecause: string | null = null;
 
   private constructor() {
     super();
@@ -108,6 +112,7 @@ export default class Online extends Phaser.Events.EventEmitter {
     // a reconnect (or a refreshed page) signs back in and takes back the seat we had
     this.socket.on("connect", async () => {
       clearTimeout(this.wakeHint);
+      this.refusedBecause = null;
       this.emit("status");
       const session = load<{ refreshToken: string }>(localStorage, SESSION_KEY);
       if (session) {
@@ -126,7 +131,15 @@ export default class Online extends Phaser.Events.EventEmitter {
       this.startConnecting();
       this.emit("status");
     });
-    this.socket.on("connect_error", () => this.emit("status"));
+    this.socket.on("connect_error", (err) => {
+      // a refusal from the server itself (not a network failure) doesn't retry on its own; say why, and try again later
+      if (this.socket.active) this.refusedBecause = null;
+      else {
+        this.refusedBecause = err.message;
+        window.setTimeout(() => this.socket.connect(), REFUSED_RETRY_MS);
+      }
+      this.emit("status");
+    });
     // a room we just left can still have a broadcast or two on the way; ignore those
     this.socket.on("room:lobby", (lobby) => {
       if (lobby.roomId !== this.roomId) return;
@@ -194,6 +207,7 @@ export default class Online extends Phaser.Events.EventEmitter {
   /** What to show while not connected, or null once connected. A host that sleeps when idle can take a minute to wake. */
   get connectionStatus(): string | null {
     if (this.connected) return null;
+    if (this.refusedBecause) return `The server turned this connection away: ${this.refusedBecause}. Retrying in a minute.`;
     return Date.now() - this.connectingSince < WAKE_HINT_MS ? "Connecting to the server…" : "Waking up the server… this can take up to a minute.";
   }
 
@@ -305,6 +319,23 @@ export default class Online extends Phaser.Events.EventEmitter {
     this.setQueue(null);
     this.emit("auth");
     return r;
+  }
+
+  /** Sign out on every device, this one too; every saved sign-in stops working. */
+  async logoutAll() {
+    const r = await this.request((s) => s.emitWithAck("auth:logoutAll"));
+    if (!r.ok) return r;
+    this.profile = null;
+    this.refreshToken = null;
+    localStorage.removeItem(SESSION_KEY);
+    this.setQueue(null);
+    this.emit("auth");
+    return r;
+  }
+
+  /** Change the password. Every other device is signed out; this one stays signed in, with a fresh session. */
+  async changePassword(current: string, next: string): Promise<Result> {
+    return this.signedIn(await this.request<AuthReply>((s) => s.emitWithAck("auth:password", { current, next })));
   }
 
   async refreshProfile() {

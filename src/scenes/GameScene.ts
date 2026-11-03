@@ -87,6 +87,9 @@ const CHAT_MIN_H = 200;
 const CHAT_NARROW_H = 150;
 const CHAT_INPUT_H = 40;
 const CHAT_MAX = 200;
+// players muted in chat (by name, lowercased) and whether chat is muted altogether, remembered in this browser
+const MUTED_KEY = "cellulose:muted";
+const CHAT_OFF_KEY = "cellulose:chatOff";
 // the results panel draws over everything else
 const RESULTS_DEPTH = 10;
 // how long a notice (a refused request, a click that can't place) replaces the phase text
@@ -205,6 +208,8 @@ export default class GameScene extends Phaser.Scene {
   private chatLog!: HTMLDivElement;
   private chatInput!: HTMLInputElement;
   private chatH!: number;
+  // the "Mute all" switch beside the chat's label
+  private chatToggle!: HTMLButtonElement;
   // the sidebar's contents have their own camera, clipped to the panel, so they scroll inside it
   private sidebarCam!: Phaser.Cameras.Scene2D.Camera;
   // overlays (rules, results) have a camera on top of everything, so their shade covers the sidebar too
@@ -1049,9 +1054,31 @@ export default class GameScene extends Phaser.Scene {
       paddingTop: "14px",
       borderTop: "2px solid #2b2448",
     });
+    // "Chat", and on the right a switch that hides everyone's lines
     const label = document.createElement("div");
-    label.textContent = "Chat";
-    Object.assign(label.style, { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
+    Object.assign(label.style, { display: "flex", justifyContent: "space-between", alignItems: "baseline" });
+    const title = document.createElement("span");
+    title.textContent = "Chat";
+    Object.assign(title.style, { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    Object.assign(toggle.style, {
+      background: "none",
+      border: "none",
+      padding: "0",
+      cursor: "pointer",
+      color: "#9a8ae0",
+      fontFamily: font,
+      fontSize: "13px",
+      fontWeight: "bold",
+    });
+    toggle.addEventListener("click", () => {
+      store(CHAT_OFF_KEY, !readStored<boolean>(CHAT_OFF_KEY, false));
+      this.renderChat();
+    });
+    toggle.hidden = !this.online;
+    label.append(title, toggle);
+    this.chatToggle = toggle;
     const log = document.createElement("div");
     log.setAttribute("role", "log");
     log.setAttribute("aria-label", "Chat messages");
@@ -1105,23 +1132,60 @@ export default class GameScene extends Phaser.Scene {
       return line;
     };
     const messages = this.online?.chat ?? [];
+    const off = readStored<boolean>(CHAT_OFF_KEY, false);
+    const muted = new Set(readStored<string[]>(MUTED_KEY, []));
+    this.chatToggle.textContent = off ? "Unmute all" : "Mute all";
+    const mineFrom = (m: (typeof messages)[number]) => m.from === this.online?.id;
+    // your own lines always show; muted players' don't
+    const shown = messages.filter((m) => mineFrom(m) || (!off && !muted.has(m.name.toLowerCase())));
+    const hidden = messages.length - shown.length;
     if (!this.online) log.replaceChildren(note("Play with friends, classic or ranked to chat with the other players."));
-    else if (!messages.length) log.replaceChildren(note("No messages yet. Say hi!"));
+    else if (!messages.length) log.replaceChildren(note(off ? "Chat is muted." : "No messages yet. Say hi! Click a name to mute that player."));
     else {
       log.replaceChildren(
-        ...messages.map((m) => {
+        ...shown.map((m) => {
           // textContent, never HTML: these come from other players
           const line = document.createElement("div");
           const who = document.createElement("span");
-          who.textContent = m.from === this.online!.id ? "You" : m.name;
+          who.textContent = mineFrom(m) ? "You" : m.name;
           Object.assign(who.style, { fontWeight: "bold", color: `#${(PALETTE[m.color]?.color ?? 0xd4ccff).toString(16).padStart(6, "0")}` });
+          // click someone else's name to mute them
+          if (!mineFrom(m)) {
+            Object.assign(who.style, { cursor: "pointer" });
+            who.title = `Mute ${m.name}`;
+            who.addEventListener("click", () => this.setMuted(m.name, true));
+          }
           line.append(who, `: ${m.text}`);
           return line;
         }),
       );
+      if (off) log.append(note(`Chat is muted${hidden ? ` (${hidden} hidden)` : ""}.`));
+      // muted players are listed, each a click away from being heard again
+      const mutedHere = [...new Set(messages.filter((m) => !mineFrom(m) && muted.has(m.name.toLowerCase())).map((m) => m.name))];
+      if (!off && mutedHere.length) {
+        const line = note("Muted: ");
+        mutedHere.forEach((name, i) => {
+          const undo = document.createElement("span");
+          undo.textContent = name;
+          undo.title = `Unmute ${name}`;
+          Object.assign(undo.style, { cursor: "pointer", textDecoration: "underline" });
+          undo.addEventListener("click", () => this.setMuted(name, false));
+          line.append(...(i ? [", "] : []), undo);
+        });
+        log.append(line);
+      }
     }
     const mine = messages.at(-1)?.from === this.online?.id;
     if (following || mine) log.scrollTop = log.scrollHeight;
+  }
+
+  /** Mute or unmute a player's chat, by name, in every game in this browser. */
+  private setMuted(name: string, mute: boolean) {
+    const muted = new Set(readStored<string[]>(MUTED_KEY, []));
+    if (mute) muted.add(name.toLowerCase());
+    else muted.delete(name.toLowerCase());
+    store(MUTED_KEY, [...muted]);
+    this.renderChat();
   }
 
   /**
@@ -1508,6 +1572,24 @@ export default class GameScene extends Phaser.Scene {
       this.redraw();
     }
     this.updatePhaseText();
+  }
+}
+
+/** A setting saved in this browser, or `fallback` when there's none (or storage is off, e.g. private browsing). */
+function readStored<T>(key: string, fallback: T): T {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : (JSON.parse(v) as T);
+  } catch {
+    return fallback;
+  }
+}
+
+function store(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // storage is blocked (some private modes): the setting just isn't kept
   }
 }
 
