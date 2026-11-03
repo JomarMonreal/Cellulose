@@ -1,5 +1,5 @@
-/** still: never changes; oscillator: repeats in place; spaceship: repeats while moving. */
-export type PatternKind = "still" | "oscillator" | "spaceship";
+/** still: never changes; oscillator: repeats in place; spaceship: repeats while moving; methuselah: a few cells that grow for a long time. */
+export type PatternKind = "still" | "oscillator" | "spaceship" | "methuselah";
 
 export type Pattern = {
   name: string;
@@ -29,6 +29,11 @@ export const PATTERNS: Pattern[] = [
   { name: "Beacon", kind: "oscillator", cells: parse(["OO..", "O...", "...O", "..OO"]) },
   { name: "Glider", kind: "spaceship", cells: parse([".O.", "..O", "OOO"]), dir: [1, 1] },
   { name: "LWSS", kind: "spaceship", cells: parse([".O..O", "O....", "O...O", "OOOO."]), dir: [0, -1] },
+  // methuselahs that grow big and long (not Diehard, which dies out by generation 130)
+  { name: "R-pentomino", kind: "methuselah", cells: parse([".OO", "OO.", ".O."]) },
+  { name: "Acorn", kind: "methuselah", cells: parse([".O.....", "...O...", "OO..OOO"]) },
+  { name: "B-heptomino", kind: "methuselah", cells: parse(["O.OO", "OOO.", ".O.."]) },
+  { name: "Pi-heptomino", kind: "methuselah", cells: parse(["OOO", "O.O", "O.O"]) },
 ];
 
 /** A pattern in the tutorial's guide, with what it does. */

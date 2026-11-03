@@ -13,6 +13,8 @@ const ART_GAP = 28;
 // between the card and the player counts under it
 const STATS_GAP = 14;
 const ONLINE_DOT = 0x3ddc84;
+// how long "Counting players…" waits for the server before the line goes blank
+const STATS_WAIT_MS = 5_000;
 
 /**
  * The player's rank: their best mode's tier as its creature, how far it is to the next, and every tier in a row,
@@ -43,6 +45,8 @@ export default class RankCard {
   // the rank shown: its tier's place in RANKS (-1 for a guest) and how far it is into that tier
   private rank = -1;
   private progress = 0;
+  // STATS_WAIT_MS passed without counts from the server
+  private waited = false;
   // sizes from the last measure()
   private artSize = 0;
   private icon = 0;
@@ -73,6 +77,11 @@ export default class RankCard {
     const online = Online.get();
     online.on("stats", this.showStats, this);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => online.off("stats", this.showStats, this));
+    // the counts arrive within a second or so; a server too old to send them shouldn't leave "Counting…" up for good
+    scene.time.delayedCall(STATS_WAIT_MS, () => {
+      this.waited = true;
+      this.showStats();
+    });
     this.refresh();
     this.showStats();
   }
@@ -113,7 +122,8 @@ export default class RankCard {
   /** "12 online · 340 registered", with a green dot while connected. */
   private showStats() {
     const { stats } = Online.get();
-    if (!stats) this.statsText.setText("Counting players…");
+    // a space, not nothing, keeps the line's height so the layout doesn't move when the counts arrive
+    if (!stats) this.statsText.setText(this.waited ? " " : "Counting players…");
     else this.statsText.setText(stats.registered === null ? `${stats.online} online` : `${stats.online} online · ${stats.registered} registered`);
     this.statsDot.setVisible(!!stats);
     this.placeDot();
