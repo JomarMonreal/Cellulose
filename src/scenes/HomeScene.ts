@@ -18,6 +18,9 @@ const BUTTON_GAP = 12;
 // wide enough for the buttons and the rank card side by side
 const WIDE = 860;
 const COLUMN_GAP = 56;
+// CC BY 4.0 asks for the title, author, source, licence and any changes; clicking the line opens the source
+const SOUND_CREDIT = '"Pop_9.aif" by SunnySideSound, CC BY 4.0, converted to Ogg and MP3 and made louder: the pop of newborn cells.';
+const SOUND_SOURCE = "https://freesound.org/s/67095/";
 
 /**
  * Title screen: the game's name, a row of gliders in the player colours, and play with bots, with friends,
@@ -36,10 +39,14 @@ export default class HomeScene extends Phaser.Scene {
   private gliders!: Phaser.GameObjects.Graphics;
   private buttons!: Button[];
   private blurb!: Phaser.GameObjects.Text;
+  // the sound's credit, under the blurb
+  private credit!: Phaser.GameObjects.Text;
   private account!: Phaser.GameObjects.Text;
   private logout!: Phaser.GameObjects.Text;
   // signed in only: password and sign out everywhere
   private accountLink!: Phaser.GameObjects.Text;
+  // sound effects and music volume, for everyone
+  private settingsLink!: Phaser.GameObjects.Text;
 
   private card!: RankCard;
 
@@ -80,6 +87,13 @@ export default class HomeScene extends Phaser.Scene {
       .on("pointerover", () => this.accountLink.setColor("#ffe03d"))
       .on("pointerout", () => this.accountLink.setColor("#d4ccff"))
       .on("pointerdown", () => this.scene.start("AccountScene"));
+    this.settingsLink = this.add
+      .text(0, 0, "Settings", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
+      .setOrigin(1, 0)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => this.settingsLink.setColor("#ffe03d"))
+      .on("pointerout", () => this.settingsLink.setColor("#d4ccff"))
+      .on("pointerdown", () => this.scene.start("SettingsScene"));
     // a fresher profile (after a ranked game, say) redraws the rank
     const onAuth = () => (online.player ? this.refreshRank() : this.scene.start("AuthScene"));
     online.on("auth", onAuth);
@@ -116,6 +130,13 @@ export default class HomeScene extends Phaser.Scene {
       lineSpacing: 4,
     });
 
+    this.credit = this.add
+      .text(0, 0, SOUND_CREDIT, { fontFamily: font, fontSize: "12px", color: "#9a8ae0", lineSpacing: 2 })
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => this.credit.setColor("#ffe03d"))
+      .on("pointerout", () => this.credit.setColor("#9a8ae0"))
+      .on("pointerdown", () => window.open(SOUND_SOURCE, "_blank", "noopener,noreferrer"));
+
     this.card = new RankCard(this);
 
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
@@ -142,7 +163,7 @@ export default class HomeScene extends Phaser.Scene {
     const titleW = this.title.reduce((w, t) => w + t.width, 0);
     if (titleW > colW) for (const t of this.title) t.setFontSize(Math.floor((72 * colW) / titleW));
     const titleH = this.title[0].height;
-    for (const t of [this.subtitle, this.blurb]) {
+    for (const t of [this.subtitle, this.blurb, this.credit]) {
       t.setWordWrapWidth(colW).setAlign(wide ? "left" : "center").setOrigin(wide ? 0 : 0.5, 0);
     }
 
@@ -150,15 +171,20 @@ export default class HomeScene extends Phaser.Scene {
     const glidersH = cell * 3;
     const glidersW = PALETTE.length * cell * 3 + (PALETTE.length - 1) * GLIDER_GAP;
     const buttonsH = this.buttons.length * (BTN_H + BUTTON_GAP) - BUTTON_GAP;
-    const columnH = titleH + 8 + this.subtitle.height + 32 + glidersH + 40 + buttonsH + 28 + this.blurb.height;
+    // the blurb, with the sound's credit under it
+    const blurbH = this.blurb.height + 10 + this.credit.height;
+    const columnH = titleH + 8 + this.subtitle.height + 32 + glidersH + 40 + buttonsH + 28 + blurbH;
 
     const cardNeed = this.card.measure(cardW, wide);
     const footH = this.card.footH;
 
     this.logout.setPosition(width - PAD, PAD);
     this.accountLink.setPosition(width - PAD - this.logout.width - 24, PAD);
+    // Settings, then Account (signed in) and Log out (or Sign in), right to left
+    const beforeSettings = this.accountLink.visible ? this.accountLink.x - this.accountLink.width : this.logout.x - this.logout.width;
+    this.settingsLink.setPosition(beforeSettings - 24, PAD);
     // who's signed in sits left of the links, or under them when the screen's too narrow for both
-    const linksLeft = this.accountLink.visible ? this.accountLink.x - this.accountLink.width : this.logout.x - this.logout.width;
+    const linksLeft = this.settingsLink.x - this.settingsLink.width;
     const crowded = PAD + this.account.width + 16 > linksLeft;
     this.account.setPosition(PAD, crowded ? PAD + this.logout.height + 8 : PAD);
     const top = this.account.y + this.account.height + 16;
@@ -179,10 +205,11 @@ export default class HomeScene extends Phaser.Scene {
       const y = Math.max(top, (height - totalH) / 2);
       // the blurb goes under the card, so lay the column out without it and move it down after
       this.layoutColumn(x, y, colW, titleH, cell, glidersW, false);
-      const cardY = y + columnH - this.blurb.height;
+      const cardY = y + columnH - blurbH;
       this.card.layout(x, cardY, cardW, cardH);
       this.blurb.setPosition(width / 2, cardY + cardH + footH + 28);
     }
+    this.credit.setPosition(this.blurb.x, this.blurb.y + this.blurb.height + 10);
   }
 
   /** The title, subtitle, gliders, buttons and blurb, from (x, y) down, left-aligned or centred in the column. */

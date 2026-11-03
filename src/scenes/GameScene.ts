@@ -7,6 +7,7 @@ import Online from "../net/Online";
 import type { GameAction, GameState, LobbyState, RankedResult } from "../net/protocol";
 import { GUIDE } from "../patterns";
 import Player, { PALETTE } from "../Player";
+import { isMuted, loadSounds, popForBirths, popForPlace, setMuted } from "../sound";
 import {
   BTN_H,
   type Button,
@@ -182,6 +183,9 @@ export default class GameScene extends Phaser.Scene {
   private quitButton!: Button;
   // the × drawn over the Quit button
   private quitIcon!: Phaser.GameObjects.Graphics;
+  // sound on or off, left of Rules: a speaker drawn over the button, with waves or a cross
+  private soundButton!: Button;
+  private soundIcon!: Phaser.GameObjects.Graphics;
   private rulesButton!: Button;
   private generationText!: Phaser.GameObjects.Text;
   private phaseText!: Phaser.GameObjects.Text;
@@ -309,6 +313,10 @@ export default class GameScene extends Phaser.Scene {
     this.zoomY = 0;
   }
 
+  preload() {
+    loadSounds(this);
+  }
+
   create() {
     const font = fontFamily();
     const display = displayFont();
@@ -333,6 +341,8 @@ export default class GameScene extends Phaser.Scene {
     this.rulesButton = makeButton(this, "?", SECONDARY, () => this.openRules());
     this.quitButton = makeButton(this, "", SECONDARY, () => this.quit());
     this.quitIcon = this.add.graphics();
+    this.soundButton = makeButton(this, "", SECONDARY, () => this.toggleSound());
+    this.soundIcon = this.add.graphics();
     this.generationText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", color: "#d4ccff" });
     this.phaseText = this.add.text(0, 0, "", { fontFamily: font, fontSize: "16px", fontStyle: "bold", color: "#ffe03d" });
     this.playButton = makeButton(this, "Play", PRIMARY, () => this.play());
@@ -344,7 +354,7 @@ export default class GameScene extends Phaser.Scene {
     this.zoomInput = this.add.dom(0, 0, this.makeZoomInput(font)).setOrigin(0);
 
     this.patternsButton = makeButton(this, "Patterns", SECONDARY, () => this.openPatterns());
-    const keys = this.online ? "Space: ready · ?: rules · P: patterns · Enter: chat" : "Space: ready · ?: rules · P: patterns";
+    const keys = this.online ? "Space: ready · ?: rules · P: patterns · M: sound · Enter: chat" : "Space: ready · ?: rules · P: patterns · M: sound";
     const hint = `Click your shaded land to place a cell, or one of yours to take it back. Drag to pan, scroll to zoom.\n${keys}`;
     this.hint = this.add.text(0, 0, hint, { fontFamily: font, fontSize: "13px", color: "#d4ccff", lineSpacing: 3 });
     this.scrollbar = this.add.graphics();
@@ -362,11 +372,12 @@ export default class GameScene extends Phaser.Scene {
     const sidebarObjects: Phaser.GameObjects.GameObject[] = [
       this.title,
       this.quitIcon,
+      this.soundIcon,
       this.generationText,
       this.phaseText,
       this.zoomLabel,
       this.hint,
-      ...[this.rulesButton, this.quitButton, this.playButton, this.stopButton, this.zoomOutButton, this.zoomInButton, this.patternsButton].flatMap(
+      ...[this.soundButton, this.rulesButton, this.quitButton, this.playButton, this.stopButton, this.zoomOutButton, this.zoomInButton, this.patternsButton].flatMap(
         (b) => [b.rect, b.label],
       ),
     ];
@@ -433,7 +444,7 @@ export default class GameScene extends Phaser.Scene {
       loop: true,
       paused: true,
       callback: () => {
-        this.board.step();
+        popForBirths(this, this.board.step());
         this.board.claimTerritory();
         this.generation++;
         if (this.checkFlags() || this.generation >= this.finalGeneration) this.finish();
@@ -512,9 +523,13 @@ export default class GameScene extends Phaser.Scene {
     }
 
     const at = (grid: string, i: number) => (grid[i] === "." ? null : this.players[Number(grid[i])]);
+    // cells born since the last state: only when generations passed, so placements don't pop
+    const stepped = s.generation > this.generation;
+    let births = 0;
     this.board.cells.forEach((cols, row) =>
       cols.forEach((c, col) => {
         const i = row * s.tiles + col;
+        if (stepped && !c.is_alive && s.cells[i] !== ".") births++;
         c.owner = at(s.cells, i);
         c.is_alive = c.owner !== null;
         c.territory = at(s.territory, i);
@@ -524,6 +539,7 @@ export default class GameScene extends Phaser.Scene {
       this.players[p.seat].resources = p.resources;
       this.players[p.seat].captured_at = p.capturedAt;
     }
+    popForBirths(this, births);
     this.generation = s.generation;
     this.phaseLeft = s.phaseLeftMs;
     if (s.phase === "over") this.finish();
@@ -559,7 +575,7 @@ export default class GameScene extends Phaser.Scene {
       // only whole flags, so one never spills past the board's visible area
       if (x < this.view.x || y < this.view.y || x + s > this.view.right || c.y + c.h > this.view.bottom) continue;
       const pole = Math.max(1, s * 0.1);
-      g.fillStyle(FLAG_OUTLINE).fillRect(px - pole / 2, y + s * 0.12, pole, s * 0.78);
+      g.fillStyle(FLAG_OUTLINE).fillRect(px - pole / 2, y + s * 0.12 - 5, pole, s * 0.78);
       g.fillStyle(p.main_color).lineStyle(Math.max(1, s * 0.06), FLAG_OUTLINE);
       g.fillTriangle(px, y + s * 0.12, px + s * 0.62, y + s * 0.3, px, y + s * 0.5);
       g.strokeTriangle(px, y + s * 0.12, px + s * 0.62, y + s * 0.3, px, y + s * 0.5);
@@ -808,6 +824,8 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
     const p = this.human;
+    // the pop is right away, not when the server answers: it's for the click, and a refusal says so anyway
+    if (action === "place") popForPlace(this);
     if (this.online) {
       // just a request: the server checks it against the true board and broadcasts the result
       this.request({ type: action, row: cell.row, col: cell.col });
@@ -876,6 +894,7 @@ export default class GameScene extends Phaser.Scene {
       this.play();
     } else if (e.key === "?" || e.key === "h") this.openRules();
     else if (e.key === "p" || e.key === "P") this.openPatterns();
+    else if (e.key === "m" || e.key === "M") this.toggleSound();
     else if (e.key === "Enter" && this.online) {
       e.preventDefault();
       this.chatInput.focus();
@@ -885,6 +904,29 @@ export default class GameScene extends Phaser.Scene {
       this.zoom = 1;
       this.panX = this.panY = 0;
       this.applyView();
+    }
+  }
+
+  /** Mute or unmute everything, sound effects and music; the volumes themselves are in Settings. */
+  private toggleSound() {
+    setMuted(!isMuted());
+    this.drawSoundIcon();
+  }
+
+  /** A speaker on the sound button: with waves while sound is on, crossed out while it's off. */
+  private drawSoundIcon() {
+    const { rect } = this.soundButton;
+    const cx = rect.x + ICON_BTN / 2;
+    const cy = rect.y + ICON_BTN / 2;
+    const g = this.soundIcon.clear().fillStyle(0xf8f5ff);
+    // the speaker: a small box and its cone
+    g.fillRect(cx - 10, cy - 4, 5, 8);
+    g.fillTriangle(cx - 6, cy - 4, cx + 1, cy - 9, cx + 1, cy + 9).fillTriangle(cx - 6, cy - 4, cx + 1, cy + 9, cx - 6, cy + 4);
+    g.lineStyle(2.5, 0xf8f5ff);
+    if (!isMuted()) {
+      for (const r of [5, 9]) g.beginPath().arc(cx + 1, cy, r, -Math.PI / 4, Math.PI / 4).strokePath();
+    } else {
+      g.lineBetween(cx + 4, cy - 4, cx + 10, cy + 4).lineBetween(cx + 4, cy + 4, cx + 10, cy - 4);
     }
   }
 
@@ -1133,7 +1175,7 @@ export default class GameScene extends Phaser.Scene {
     };
     const messages = this.online?.chat ?? [];
     const off = readStored<boolean>(CHAT_OFF_KEY, false);
-    const muted = new Set(readStored<string[]>(MUTED_KEY, []));
+    const muted = new Set(mutedNames());
     this.chatToggle.textContent = off ? "Unmute all" : "Mute all";
     const mineFrom = (m: (typeof messages)[number]) => m.from === this.online?.id;
     // your own lines always show; muted players' don't
@@ -1181,7 +1223,7 @@ export default class GameScene extends Phaser.Scene {
 
   /** Mute or unmute a player's chat, by name, in every game in this browser. */
   private setMuted(name: string, mute: boolean) {
-    const muted = new Set(readStored<string[]>(MUTED_KEY, []));
+    const muted = new Set(mutedNames());
     if (mute) muted.add(name.toLowerCase());
     else muted.delete(name.toLowerCase());
     store(MUTED_KEY, [...muted]);
@@ -1435,8 +1477,11 @@ export default class GameScene extends Phaser.Scene {
     const patternsY = wide ? 284 : 180;
 
     // wrap first: a title that wraps pushes everything below it down. It leaves room for Rules and Quit.
-    this.title.setWordWrapWidth(sw - 40 - ICON_BTN * 2 - ICON_GAP - 12);
-    const extra = this.title.height - this.titleLineH;
+    const titleW = sw - 40 - ICON_BTN * 3 - ICON_GAP * 2 - 12;
+    this.title.setFontSize(24).setWordWrapWidth(titleW);
+    // a word longer than the room ("Strongest") can't wrap, so the title shrinks until each word fits
+    for (let size = 24; this.title.width > titleW && size > 16; ) this.title.setFontSize(--size);
+    const extra = Math.max(0, this.title.height - this.titleLineH);
     // the sidebar has room for a reminder of the controls only beside the board
     this.hint.setVisible(wide).setWordWrapWidth(sw - 40);
     // from the sidebar's top to the bottom of the controls
@@ -1467,10 +1512,12 @@ export default class GameScene extends Phaser.Scene {
 
     this.sidebar.setPosition(sx, sy).setSize(sw, sh);
     this.title.setPosition(sx + 20, sy + 20);
-    // [?] [×] in the top corner
+    // [sound] [?] [×] in the top corner
     const qx = sx + sw - 20 - ICON_BTN;
     layoutButton(this.quitButton, qx, sy + 14, ICON_BTN, ICON_BTN);
     layoutButton(this.rulesButton, qx - ICON_GAP - ICON_BTN, sy + 14, ICON_BTN, ICON_BTN);
+    layoutButton(this.soundButton, qx - (ICON_GAP + ICON_BTN) * 2, sy + 14, ICON_BTN, ICON_BTN);
+    this.drawSoundIcon();
     const [cx, cy, arm] = [qx + ICON_BTN / 2, sy + 14 + ICON_BTN / 2, 7];
     this.quitIcon.clear().lineStyle(4, 0xf8f5ff);
     this.quitIcon.lineBetween(cx - arm, cy - arm, cx + arm, cy + arm).lineBetween(cx - arm, cy + arm, cx + arm, cy - arm);
@@ -1573,6 +1620,12 @@ export default class GameScene extends Phaser.Scene {
     }
     this.updatePhaseText();
   }
+}
+
+/** The chat's muted players, lowercased. Anything else under that key (an older build once wrote a number there) counts as none. */
+function mutedNames(): string[] {
+  const v = readStored<unknown>(MUTED_KEY, []);
+  return Array.isArray(v) ? v.filter((n): n is string => typeof n === "string") : [];
 }
 
 /** A setting saved in this browser, or `fallback` when there's none (or storage is off, e.g. private browsing). */

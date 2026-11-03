@@ -64,8 +64,9 @@ export default class Board {
    * Advance one generation using Conway's rules, counting every live neighbour whoever owns it.
    * A live cell with 2 or 3 neighbours survives and stays its owner's. A dead cell with exactly 3 is born
    * to whichever player owns most of those 3; if all 3 belong to different players, one of them at random.
+   * Returns how many cells were born.
    */
-  step() {
+  step(): number {
     const next = this.cells.map((cols) =>
       cols.map((c): Player | null => {
         const parents = c.get_neighbors(this.cells).filter((n) => n.is_alive && n.owner);
@@ -77,12 +78,15 @@ export default class Board {
         return [a, b, d][Math.floor(Math.random() * 3)];
       }),
     );
+    let births = 0;
     this.cells.forEach((cols, row) =>
       cols.forEach((c, col) => {
+        if (!c.is_alive && next[row][col]) births++;
         c.owner = next[row][col];
         c.is_alive = c.owner !== null;
       }),
     );
+    return births;
   }
 
   /** Give `player` every tile in the rect, e.g. their starting corner. */

@@ -8,6 +8,7 @@ import LobbyScene from "./scenes/LobbyScene";
 import OnlineLobbyScene from "./scenes/OnlineLobbyScene";
 import PlaygroundScene from "./scenes/PlaygroundScene";
 import RankedScene from "./scenes/RankedScene";
+import SettingsScene from "./scenes/SettingsScene";
 import TutorialScene from "./scenes/TutorialScene";
 
 export function createGameConfig(parent: HTMLElement): Phaser.Types.Core.GameConfig {
@@ -25,10 +26,7 @@ export function createGameConfig(parent: HTMLElement): Phaser.Types.Core.GameCon
     dom: { createContainer: true },
     // the wheel scrolls the page when a screen is taller than the window (fitHeight); boards keep it for zoom (keepWheel)
     input: { mouse: { preventDefaultWheel: false } },
-    // no sound yet; without this Phaser opens an AudioContext and, after the game is destroyed
-    // (e.g. React's dev-mode remount), tries to suspend/resume it once it's closed
-    audio: { noAudio: true },
     // the first scene starts on boot: sign in before anything else
-    scene: [AuthScene, HomeScene, AccountScene, LobbyScene, OnlineLobbyScene, RankedScene, LeaderboardScene, GameScene, PlaygroundScene, TutorialScene],
+    scene: [AuthScene, HomeScene, AccountScene, LobbyScene, OnlineLobbyScene, RankedScene, LeaderboardScene, GameScene, PlaygroundScene, TutorialScene, SettingsScene],
   };
 }

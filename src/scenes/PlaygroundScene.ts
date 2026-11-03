@@ -2,6 +2,7 @@ import * as Phaser from "phaser";
 import Board from "../Board";
 import type Cell from "../Cell";
 import Player, { PALETTE } from "../Player";
+import { isMuted, loadSounds, popForBirths, popForPlace, setMuted } from "../sound";
 import {
   BTN_H,
   type Button,
@@ -120,6 +121,10 @@ export default class PlaygroundScene extends Phaser.Scene {
     this.panning = false;
   }
 
+  preload() {
+    loadSounds(this);
+  }
+
   create() {
     const font = fontFamily();
     const display = displayFont();
@@ -166,7 +171,7 @@ export default class PlaygroundScene extends Phaser.Scene {
     const hint = [
       "Click a tile to draw in the chosen colour, or a cell of that colour to erase it. Drag to pan, scroll to zoom.",
       "A new cell takes the colour most of its parents share.",
-      "Space: play / pause · 1–4: colour",
+      "Space: play / pause · 1–4: colour · M: sound",
     ].join("\n");
     this.hint = this.add.text(0, 0, hint, { fontFamily: font, fontSize: "13px", color: "#d4ccff", lineSpacing: 3 });
 
@@ -258,7 +263,10 @@ export default class PlaygroundScene extends Phaser.Scene {
   /** Clicking a tile with the chosen colour: an empty tile or another colour's cell becomes that colour, and its own cell is erased. */
   private paint(cell: Cell) {
     if (this.erases(cell)) [cell.is_alive, cell.owner] = [false, null];
-    else [cell.is_alive, cell.owner] = [true, this.colors[this.color]];
+    else {
+      [cell.is_alive, cell.owner] = [true, this.colors[this.color]];
+      popForPlace(this);
+    }
     this.redraw();
   }
 
@@ -344,7 +352,7 @@ export default class PlaygroundScene extends Phaser.Scene {
     g.strokeRect(x, y, w, h);
   }
 
-  /** Space plays or pauses, 1 to 4 pick a colour, + and - zoom, 0 resets the view. Not while typing in a field. */
+  /** Space plays or pauses, 1 to 4 pick a colour, + and - zoom, 0 resets the view, M turns sound on or off. Not while typing in a field. */
   private onKey(e: KeyboardEvent) {
     if (document.activeElement instanceof HTMLInputElement) return;
     const n = Number(e.key);
@@ -354,7 +362,10 @@ export default class PlaygroundScene extends Phaser.Scene {
     } else if (n >= 1 && n <= this.colors.length) this.pickColor(n - 1);
     else if (e.key === "+" || e.key === "=") this.zoomAtCenter(this.zoom * ZOOM_STEP);
     else if (e.key === "-" || e.key === "_") this.zoomAtCenter(this.zoom / ZOOM_STEP);
-    else if (e.key === "0") {
+    else if (e.key === "m" || e.key === "M") {
+      setMuted(!isMuted());
+      this.say(isMuted() ? "Sound off" : "Sound on");
+    } else if (e.key === "0") {
       this.zoom = 1;
       this.panX = this.panY = 0;
       this.applyView();
@@ -507,7 +518,7 @@ export default class PlaygroundScene extends Phaser.Scene {
     this.elapsed = Math.min(this.elapsed + delta, interval * MAX_STEPS_PER_FRAME);
     let stepped = false;
     while (this.elapsed >= interval && this.generation < this.limit) {
-      this.board.step();
+      popForBirths(this, this.board.step());
       this.generation++;
       this.elapsed -= interval;
       stepped = true;
