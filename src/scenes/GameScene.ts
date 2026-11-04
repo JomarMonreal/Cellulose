@@ -486,7 +486,7 @@ export default class GameScene extends Phaser.Scene {
       loop: true,
       paused: true,
       callback: () => {
-        popForBirths(this, this.board.step());
+        popForBirths(this, this.board.step(this.players, this.generation));
         this.board.claimTerritory();
         this.generation++;
         if (this.checkFlags() || this.generation >= this.finalGeneration) this.finish();

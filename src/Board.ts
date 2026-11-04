@@ -63,10 +63,15 @@ export default class Board {
   /**
    * Advance one generation using Conway's rules, counting every live neighbour whoever owns it.
    * A live cell with 2 or 3 neighbours survives and stays its owner's. A dead cell with exactly 3 is born
-   * to whichever player owns most of those 3; if all 3 belong to different players, one of them at random.
+   * to whichever player owns most of those 3. If all 3 belong to different players, it goes to whichever of them
+   * comes first in a turn order that shifts every generation: `players[generation % players.length]` first, then
+   * the ones after it. No luck, and over a game nobody is favoured. CelluloseServer's Board does the same.
    * Returns how many cells were born.
    */
-  step(): number {
+  step(players: Player[], generation: number): number {
+    const first = generation % players.length;
+    // how far after this generation's first player someone comes: the lowest wins a three-way birth
+    const turn = (p: Player) => (players.indexOf(p) - first + players.length) % players.length;
     const next = this.cells.map((cols) =>
       cols.map((c): Player | null => {
         const parents = c.get_neighbors(this.cells).filter((n) => n.is_alive && n.owner);
@@ -75,7 +80,7 @@ export default class Board {
         const [a, b, d] = parents.map((n) => n.owner!);
         if (a === b || a === d) return a;
         if (b === d) return b;
-        return [a, b, d][Math.floor(Math.random() * 3)];
+        return [a, b, d].reduce((best, p) => (turn(p) < turn(best) ? p : best));
       }),
     );
     let births = 0;

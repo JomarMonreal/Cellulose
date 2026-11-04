@@ -518,7 +518,7 @@ export default class PlaygroundScene extends Phaser.Scene {
     this.elapsed = Math.min(this.elapsed + delta, interval * MAX_STEPS_PER_FRAME);
     let stepped = false;
     while (this.elapsed >= interval && this.generation < this.limit) {
-      popForBirths(this, this.board.step());
+      popForBirths(this, this.board.step(this.colors, this.generation));
       this.generation++;
       this.elapsed -= interval;
       stepped = true;
