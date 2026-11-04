@@ -1,5 +1,6 @@
 import * as Phaser from "phaser";
 import Ai from "../Ai";
+import { avatarTexture } from "../avatars";
 import Board, { CLAIM_RADIUS } from "../Board";
 import type Cell from "../Cell";
 import { type Mode, modeName } from "../modes";
@@ -181,6 +182,8 @@ type Patterns = {
 type Badge = {
   disc: Phaser.GameObjects.Graphics;
   letter: Phaser.GameObjects.Text;
+  // the player's profile picture over the disc, once it's loaded; until then (or without one) the letter shows
+  picture: Phaser.GameObjects.Image;
   name: Phaser.GameObjects.Text;
   count: Phaser.GameObjects.Text;
 };
@@ -401,9 +404,11 @@ export default class GameScene extends Phaser.Scene {
     this.badges = this.players.map((_, i) => ({
       disc: this.add.graphics(),
       letter: this.add.text(0, 0, initial(this.realName(i)), { fontFamily: display, fontSize: "20px", color: "#120e22" }).setOrigin(0.5),
+      picture: this.add.image(0, 0, "__DEFAULT").setVisible(false),
       name: this.add.text(0, 0, "", { fontFamily: font, fontSize: "13px", fontStyle: "bold", color: "#f8f5ff" }),
       count: this.add.text(0, 0, "", { fontFamily: display, fontSize: "18px", color: "#ffe03d" }),
     }));
+    this.loadBadgePictures();
 
     // everything below the sidebar's title bar moves with the sidebar's scroll; the main camera skips it
     const sidebarObjects: Phaser.GameObjects.GameObject[] = [
@@ -1465,6 +1470,27 @@ export default class GameScene extends Phaser.Scene {
     ].join("\n");
   }
 
+  /**
+   * Each badge's picture, for players who have one: online, from the room's lobby (by seat); offline, yours, from your
+   * profile. Bots and guests keep their letter, as does anyone whose picture can't be loaded.
+   */
+  private loadBadgePictures() {
+    const online = Online.get();
+    this.players.forEach((player, i) => {
+      const avatar = this.online ? this.online.lobby?.members.find((m) => m.seat === i)?.avatar : player === this.human ? online.profile?.avatar : null;
+      const url = online.pictureUrl(avatar);
+      if (!url) return;
+      const badge = this.badges[i];
+      void avatarTexture(this, url).then((key) => {
+        // the game may be over and gone by the time a slow picture arrives
+        if (!key || !badge.picture.active) return;
+        const { displayWidth, displayHeight } = badge.picture;
+        badge.picture.setTexture(key).setDisplaySize(displayWidth, displayHeight).setVisible(true);
+        badge.letter.setVisible(false);
+      });
+    });
+  }
+
   /** A player's own name: the board calls you "You", but your badge's letter is your username or guest name. */
   private realName(i: number) {
     if (this.online) return this.online.state?.players[i]?.name ?? this.players[i].name;
@@ -1477,13 +1503,13 @@ export default class GameScene extends Phaser.Scene {
       // who's been captured; online, also who's dropped out and who's done placing
       const info = this.online?.state?.players[i];
       const tags = [p.captured_at !== null && "captured", info && !info.connected && "offline", this.placing && info?.ready && "ready"].filter(Boolean);
-      const { disc, letter, name, count } = this.badges[i];
+      const { disc, letter, picture, name, count } = this.badges[i];
       const maxW = this.badgeTextW[i] ?? 0;
       fitText(name, `${p.name}${tags.length ? ` (${tags.join(", ")})` : ""}`, maxW);
       // a small board leaves room for just the number
       count.setText(`${p.resources} to place`);
       if (maxW > 0 && count.width > maxW) count.setText(String(p.resources));
-      for (const o of [disc, letter, name, count]) o.setAlpha(p.captured_at === null ? 1 : 0.4);
+      for (const o of [disc, letter, picture, name, count]) o.setAlpha(p.captured_at === null ? 1 : 0.4);
     });
   }
 
@@ -1501,7 +1527,7 @@ export default class GameScene extends Phaser.Scene {
       const shared = this.corners.some((o) => o !== c && top(o) === top(c));
       return (shared ? this.view.width / 2 : this.view.width - MARGIN) - MARGIN - r * 2 - 18;
     });
-    this.badges.forEach(({ disc, letter, name, count }, i) => {
+    this.badges.forEach(({ disc, letter, picture, name, count }, i) => {
       const corner = this.corners[i];
       const left = corner === 0 || corner === 3;
       const cx = left ? x + MARGIN + r : right - MARGIN - r;
@@ -1509,6 +1535,8 @@ export default class GameScene extends Phaser.Scene {
       disc.clear().fillStyle(this.players[i].main_color).fillCircle(cx, cy, r);
       disc.lineStyle(3, this.players[i] === this.human ? 0xffe03d : BADGE_RING).strokeCircle(cx, cy, r);
       letter.setFontSize(Math.round(r * 1.1)).setPosition(cx, cy);
+      // inside the ring, which stays drawn around it
+      picture.setPosition(cx, cy).setDisplaySize(r * 2 - 4, r * 2 - 4);
       const tx = left ? cx + r + 10 : cx - r - 10;
       name.setOrigin(left ? 0 : 1, 1).setPosition(tx, cy + 1);
       count.setOrigin(left ? 0 : 1, 0).setPosition(tx, cy - 1);

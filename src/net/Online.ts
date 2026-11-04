@@ -338,6 +338,37 @@ export default class Online extends Phaser.Events.EventEmitter {
     return this.signedIn(await this.request<AuthReply>((s) => s.emitWithAck("auth:password", { current, next })));
   }
 
+  /** A picture address from the server, made absolute: on a dev server without Supabase it's a path on the server. */
+  pictureUrl(avatar: string | null | undefined): string | null {
+    if (!avatar) return null;
+    return avatar.startsWith("/") ? SERVER_URL + avatar : avatar;
+  }
+
+  /** Set the signed-in player's picture: a ticket over the connection, then the picture itself as one upload. */
+  async uploadAvatar(picture: Blob): Promise<Result> {
+    const ticket = await this.request<Result<{ url: string }>>((s) => s.emitWithAck("profile:avatarTicket"));
+    if (!ticket.ok) return ticket;
+    try {
+      const res = await fetch(SERVER_URL + ticket.url, { method: "POST", body: picture, headers: { "content-type": picture.type } });
+      const r = (await res.json()) as Result<{ profile: Profile }>;
+      if (!r.ok) return r;
+      this.profile = r.profile;
+      this.emit("auth");
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: "couldn't upload the picture" };
+    }
+  }
+
+  /** Go back to no picture: the badge shows the name's first letter again. */
+  async removeAvatar(): Promise<Result> {
+    const r = await this.request<Result<{ profile: Profile }>>((s) => s.emitWithAck("profile:avatarRemove"));
+    if (!r.ok) return r;
+    this.profile = r.profile;
+    this.emit("auth");
+    return { ok: true };
+  }
+
   async refreshProfile() {
     const r = await this.request<Result<{ profile: Profile }>>((s) => s.emitWithAck("auth:profile"));
     if (!r.ok) return;

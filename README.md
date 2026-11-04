@@ -55,6 +55,8 @@ src/
   ui.ts                     # shared buttons and colours
   scenes/HomeScene.ts       # title screen
   scenes/SettingsScene.ts   # sound effects and music volume, mute
+  ProfileMenu.ts            # top right of the home screen: name and avatar, dropping down Settings, Account, Log out
+  avatars.ts                # profile pictures: shrunk to 128x128 before upload, drawn round on the badges
   sound.ts                  # the pop (births and placements) and the music: bass_background on menus, gameplay in games
   RankCard.ts               # the rank card (home and ranked screens), with players online and registered under it
   scenes/LobbyScene.ts      # colour and opponent picker

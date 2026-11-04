@@ -23,7 +23,8 @@ export type Result<T = object> = ({ ok: true } & T) | { ok: false; reason: strin
 export type JoinReply = Result<{ roomId: string; id: string; seat: number; token: string }>;
 
 /** `seat` is the board seat while a game runs, otherwise the place in the join order. */
-export type LobbyMember = { id: string; seat: number; name: string; color: number; connected: boolean; host: boolean };
+/** `avatar`: a signed-in member's picture (see Profile.avatar); null for guests and players without one. */
+export type LobbyMember = { id: string; seat: number; name: string; color: number; connected: boolean; host: boolean; avatar: string | null };
 
 export type LobbyState = {
   roomId: string;
@@ -143,6 +144,11 @@ export type Profile = {
   wins: Record<Mode, number>;
   /** The tier name each rating is in. */
   tier: Record<Mode, string>;
+  /**
+   * The profile picture's address, or null for none (show the name's first letter). An address starting with "/"
+   * is on the game server itself (a dev server without Supabase).
+   */
+  avatar: string | null;
 };
 
 export type AuthReply = Result<{ session: Session; profile: Profile; tiers: Tier[] }>;
@@ -213,6 +219,13 @@ export interface ClientToServerEvents {
   /** Change the password: every other device is signed out, and this connection gets a fresh session. */
   "auth:password": (req: { current: string; next: string }, ack: (r: AuthReply) => void) => void;
   "auth:profile": (ack: (r: Result<{ profile: Profile }>) => void) => void;
+  /**
+   * Ask to set your profile picture. The reply's `url` takes one POST of the picture (a 128x128 WebP or PNG, as the
+   * body, with its content-type) within a couple of minutes; it answers with the new profile.
+   */
+  "profile:avatarTicket": (ack: (r: Result<{ url: string }>) => void) => void;
+  /** Go back to no picture. */
+  "profile:avatarRemove": (ack: (r: Result<{ profile: Profile }>) => void) => void;
 
   /**
    * Wait for a match of this kind and mode. Ranked needs a signed-in connection; classic takes anyone, and a

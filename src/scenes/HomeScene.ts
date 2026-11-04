@@ -1,6 +1,7 @@
 import * as Phaser from "phaser";
 import Online from "../net/Online";
 import { PALETTE } from "../Player";
+import ProfileMenu from "../ProfileMenu";
 import RankCard from "../RankCard";
 import { BTN_H, type Button, displayFont, fitHeight, fontFamily, layoutButton, makeButton, PRIMARY, SECONDARY } from "../ui";
 
@@ -41,12 +42,8 @@ export default class HomeScene extends Phaser.Scene {
   private blurb!: Phaser.GameObjects.Text;
   // the sound's credit, under the blurb
   private credit!: Phaser.GameObjects.Text;
-  private account!: Phaser.GameObjects.Text;
-  private logout!: Phaser.GameObjects.Text;
-  // signed in only: password and sign out everywhere
-  private accountLink!: Phaser.GameObjects.Text;
-  // sound effects and music volume, for everyone
-  private settingsLink!: Phaser.GameObjects.Text;
+  // who's playing, top right, with Settings, Account and Log out under it
+  private profileMenu!: ProfileMenu;
 
   private card!: RankCard;
 
@@ -61,39 +58,17 @@ export default class HomeScene extends Phaser.Scene {
     const guest = !online.profile;
     const font = fontFamily();
     const display = displayFont();
-    this.account = this.add
-      .text(0, 0, guest ? `Playing as ${online.guest} (guest)` : `Signed in as ${online.player}`, {
-        fontFamily: font,
-        fontSize: "15px",
-        color: "#d4ccff",
-      })
-      .setOrigin(0, 0);
-    this.logout = this.add
-      .text(0, 0, guest ? "Sign in" : "Log out", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => this.logout.setColor("#ffe03d"))
-      .on("pointerout", () => this.logout.setColor("#d4ccff"))
-      .on("pointerdown", () => {
-        if (guest) return online.leaveGuest();
-        this.logout.setText("Logging out…").disableInteractive();
-        void online.logout();
-      });
-    this.accountLink = this.add
-      .text(0, 0, "Account", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
-      .setOrigin(1, 0)
-      .setVisible(!guest)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => this.accountLink.setColor("#ffe03d"))
-      .on("pointerout", () => this.accountLink.setColor("#d4ccff"))
-      .on("pointerdown", () => this.scene.start("AccountScene"));
-    this.settingsLink = this.add
-      .text(0, 0, "Settings", { fontFamily: display, fontSize: "15px", fontStyle: "bold", color: "#d4ccff" })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => this.settingsLink.setColor("#ffe03d"))
-      .on("pointerout", () => this.settingsLink.setColor("#d4ccff"))
-      .on("pointerdown", () => this.scene.start("SettingsScene"));
+    // who's playing, top right: Settings, Account and Log out (or, for a guest, Sign in) drop down from it
+    this.profileMenu = new ProfileMenu(this, [
+      { label: "Settings", onClick: () => this.scene.start("SettingsScene") },
+      ...(guest
+        ? [{ label: "Sign in", onClick: () => online.leaveGuest() }]
+        : [
+            { label: "Account", onClick: () => this.scene.start("AccountScene") },
+            // signing out emits "auth", which goes back to the sign-in screen
+            { label: "Log out", onClick: () => void online.logout() },
+          ]),
+    ]);
     // a fresher profile (after a ranked game, say) redraws the rank
     const onAuth = () => (online.player ? this.refreshRank() : this.scene.start("AuthScene"));
     online.on("auth", onAuth);
@@ -178,16 +153,8 @@ export default class HomeScene extends Phaser.Scene {
     const cardNeed = this.card.measure(cardW, wide);
     const footH = this.card.footH;
 
-    this.logout.setPosition(width - PAD, PAD);
-    this.accountLink.setPosition(width - PAD - this.logout.width - 24, PAD);
-    // Settings, then Account (signed in) and Log out (or Sign in), right to left
-    const beforeSettings = this.accountLink.visible ? this.accountLink.x - this.accountLink.width : this.logout.x - this.logout.width;
-    this.settingsLink.setPosition(beforeSettings - 24, PAD);
-    // who's signed in sits left of the links, or under them when the screen's too narrow for both
-    const linksLeft = this.settingsLink.x - this.settingsLink.width;
-    const crowded = PAD + this.account.width + 16 > linksLeft;
-    this.account.setPosition(PAD, crowded ? PAD + this.logout.height + 8 : PAD);
-    const top = this.account.y + this.account.height + 16;
+    this.profileMenu.layout(width - PAD, PAD);
+    const top = PAD + this.profileMenu.height + 16;
 
     if (wide) {
       const cardH = Math.max(columnH, cardNeed);
