@@ -1461,6 +1461,7 @@ export default class GameScene extends Phaser.Scene {
     return [
       "• Place cells on your shaded land during setup and placement windows. Click your own cell to take it back.",
       "• A cell lives on with 2 or 3 neighbours. An empty tile with exactly 3 comes alive for the colour with the most of them.",
+      "• Three different colours around one empty tile? Players take turns being first in line, a new player each generation, and the tile goes to whichever of the three is first in line.",
       `• Live cells claim the land ${CLAIM_RADIUS} tiles around them.`,
       `• Every ${GRANT_EVERY} generations: ${PLACE_MS / 1000}s to place, +${ROUND_RESOURCES} cells, plus the cube root of land gained.`,
       this.mode === "ctf"
