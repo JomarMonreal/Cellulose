@@ -69,9 +69,11 @@ const AI_PLACE_MAX_MS = 500;
 // top-left, one opponent sits across the board, two take the corners beside you. The server seats online games the same way.
 const CORNER_SLOTS: Record<number, number[]> = { 1: [0], 2: [0, 2], 3: [0, 1, 3], 4: [0, 1, 2, 3] };
 // each player's badge sits at their corner, in a band above or below the board: their initial on a disc in their colour,
-// then their name and how many cells they have left to place
-const BADGE_BAND = 52;
-const BADGE_BAND_NARROW = 44;
+// then their name, how many cells they have left to place, and (smaller, under that) how much land they hold
+const BADGE_BAND = 64;
+const BADGE_BAND_NARROW = 56;
+// the band's extra height for the land line; the disc stays the size it was without it
+const BADGE_LAND_H = 12;
 const BADGE_RING = 0x120e22;
 // the square Rules and Quit buttons in the sidebar's top corner
 const ICON_BTN = 40;
@@ -181,6 +183,8 @@ type Badge = {
   picture: Phaser.GameObjects.Image;
   name: Phaser.GameObjects.Text;
   count: Phaser.GameObjects.Text;
+  // how much land they hold, small, under the count
+  land: Phaser.GameObjects.Text;
 };
 
 export default class GameScene extends Phaser.Scene {
@@ -399,6 +403,7 @@ export default class GameScene extends Phaser.Scene {
       picture: this.add.image(0, 0, "__DEFAULT").setVisible(false),
       name: this.add.text(0, 0, "", { fontFamily: font, fontSize: "13px", fontStyle: "bold", color: "#f8f5ff" }),
       count: this.add.text(0, 0, "", { fontFamily: display, fontSize: "18px", color: "#ffe03d" }),
+      land: this.add.text(0, 0, "", { fontFamily: font, fontSize: "11px", fontStyle: "bold", color: "#d4ccff" }),
     }));
     this.loadBadgePictures();
 
@@ -1355,19 +1360,23 @@ export default class GameScene extends Phaser.Scene {
     return this.players[i] === this.human ? (Online.get().player ?? this.human.name) : this.players[i].name;
   }
 
-  /** Each badge's name and cells to place; a captured player's badge fades. */
+  /** Each badge's name, cells to place and land held; a captured player's badge fades. */
   private updatePlayerTexts() {
     this.players.forEach((p, i) => {
       // who's been captured; online, also who's dropped out and who's done placing
       const info = this.online?.state?.players[i];
       const tags = [p.captured_at !== null && "captured", info && !info.connected && "offline", this.placing && info?.ready && "ready"].filter(Boolean);
-      const { disc, letter, picture, name, count } = this.badges[i];
+      const { disc, letter, picture, name, count, land } = this.badges[i];
       const maxW = this.badgeTextW[i] ?? 0;
       fitText(name, `${p.name}${tags.length ? ` (${tags.join(", ")})` : ""}`, maxW);
       // a small board leaves room for just the number
       count.setText(`${p.resources} to place`);
       if (maxW > 0 && count.width > maxW) count.setText(String(p.resources));
-      for (const o of [disc, letter, picture, name, count]) o.setAlpha(p.captured_at === null ? 1 : 0.4);
+      // online the server's count (it follows every update); offline, counted from the board
+      const tiles = info?.land ?? this.board.territoryOf(p);
+      land.setText(`${tiles} land`);
+      if (maxW > 0 && land.width > maxW) land.setText(String(tiles));
+      for (const o of [disc, letter, picture, name, count, land]) o.setAlpha(p.captured_at === null ? 1 : 0.4);
     });
   }
 
@@ -1377,7 +1386,7 @@ export default class GameScene extends Phaser.Scene {
    */
   private layoutBadges() {
     const band = this.badgeBand;
-    const r = band / 2 - 4;
+    const r = (band - BADGE_LAND_H) / 2 - 4;
     const { x, y, right, bottom } = this.view;
     // a band shared by two badges gives each half its width; a badge alone in its band has all of it
     const top = (c: number) => c < 2;
@@ -1385,7 +1394,7 @@ export default class GameScene extends Phaser.Scene {
       const shared = this.corners.some((o) => o !== c && top(o) === top(c));
       return (shared ? this.view.width / 2 : this.view.width - MARGIN) - MARGIN - r * 2 - 18;
     });
-    this.badges.forEach(({ disc, letter, picture, name, count }, i) => {
+    this.badges.forEach(({ disc, letter, picture, name, count, land }, i) => {
       const corner = this.corners[i];
       const left = corner === 0 || corner === 3;
       const cx = left ? x + MARGIN + r : right - MARGIN - r;
@@ -1396,8 +1405,10 @@ export default class GameScene extends Phaser.Scene {
       // inside the ring, which stays drawn around it
       picture.setPosition(cx, cy).setDisplaySize(r * 2 - 4, r * 2 - 4);
       const tx = left ? cx + r + 10 : cx - r - 10;
-      name.setOrigin(left ? 0 : 1, 1).setPosition(tx, cy + 1);
-      count.setOrigin(left ? 0 : 1, 0).setPosition(tx, cy - 1);
+      // name, count and land stacked, the stack centred on the disc
+      name.setOrigin(left ? 0 : 1, 1).setPosition(tx, cy - 7);
+      count.setOrigin(left ? 0 : 1, 0).setPosition(tx, cy - 9);
+      land.setOrigin(left ? 0 : 1, 0).setPosition(tx, cy + 11);
     });
     this.updatePlayerTexts();
   }
