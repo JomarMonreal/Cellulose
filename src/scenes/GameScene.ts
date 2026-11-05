@@ -4,6 +4,7 @@ import { avatarTexture } from "../avatars";
 import Board, { CLAIM_RADIUS } from "../Board";
 import type Cell from "../Cell";
 import { type Mode, modeName } from "../modes";
+import ChatBox from "../net/ChatBox";
 import Online from "../net/Online";
 import type { GameAction, GameState, LobbyState, RankedResult } from "../net/protocol";
 import { GUIDE } from "../patterns";
@@ -24,7 +25,6 @@ import {
   setButtonDepth,
   setButtonLoading,
   showFocus,
-  textInput,
 } from "../ui";
 
 const PAD = 24;
@@ -87,11 +87,6 @@ const PATTERN_DRAWING_H = 72;
 // the chat fills the sidebar under the controls, at least this tall beside the board, and exactly this tall below it
 const CHAT_MIN_H = 200;
 const CHAT_NARROW_H = 150;
-const CHAT_INPUT_H = 40;
-const CHAT_MAX = 200;
-// players muted in chat (by name, lowercased) and whether chat is muted altogether, remembered in this browser
-const MUTED_KEY = "cellulose:muted";
-const CHAT_OFF_KEY = "cellulose:chatOff";
 // the results panel draws over everything else
 const RESULTS_DEPTH = 10;
 // the results: the crowned winner's disc, the land bars, and the medals for 1st, 2nd and 3rd
@@ -244,11 +239,8 @@ export default class GameScene extends Phaser.Scene {
   private patterns?: Patterns;
   // HTML, pinned to the sidebar's foot: it never scrolls with the controls above it
   private chat!: Phaser.GameObjects.DOMElement;
-  private chatLog!: HTMLDivElement;
-  private chatInput!: HTMLInputElement;
+  private chatBox!: ChatBox;
   private chatH!: number;
-  // the "Mute all" switch beside the chat's label
-  private chatToggle!: HTMLButtonElement;
   // the sidebar's contents have their own camera, clipped to the panel, so they scroll inside it
   private sidebarCam!: Phaser.Cameras.Scene2D.Camera;
   // overlays (rules, results) have a camera on top of everything, so their shade covers the sidebar too
@@ -433,9 +425,9 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.ignore(this.zoomInput);
     this.overlayCam.ignore(this.children.list.filter((o) => o !== this.zoomInput));
     // the chat is HTML too, shown by the top camera only; it stays put at the sidebar's foot
-    this.chat = this.add.dom(0, 0, this.makeChat(font, display)).setOrigin(0);
+    this.chatBox = new ChatBox(this.online, (reason) => this.scene.isActive() && this.say(reason));
+    this.chat = this.add.dom(0, 0, this.chatBox.element).setOrigin(0);
     this.showOnTop([this.chat]);
-    this.renderChat();
 
     // drag pans the board; a click (press and release without dragging) places or takes back a cell
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
@@ -524,14 +516,14 @@ export default class GameScene extends Phaser.Scene {
         .on("status", this.updatePhaseText, this)
         .on("closed", onClosed)
         .on("ranked", onRanked)
-        .on("chat", this.renderChat, this);
+        .on("chat", this.chatBox.render, this.chatBox);
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
         online
           .off("state", this.applyState, this)
           .off("status", this.updatePhaseText, this)
           .off("closed", onClosed)
           .off("ranked", onRanked)
-          .off("chat", this.renderChat, this),
+          .off("chat", this.chatBox.render, this.chatBox),
       );
     }
   }
@@ -722,8 +714,16 @@ export default class GameScene extends Phaser.Scene {
     this.scene.start(this.lobbyScene, this.lobbyData);
   }
 
-  /** Online, quitting gives up your seat; offline it's just back to the lobby. */
+  /**
+   * Online, quitting gives up your seat; offline it's just back to the lobby. In a friends room you stay in the
+   * room, waiting in its lobby for the next game (Leave there to go for good).
+   */
   private quit() {
+    if (this.online && this.roomKind === "friends" && this.phase !== "over") {
+      // the lobby must know we're out of the game before it opens, or it would send us straight back in
+      void this.online.sitOut().then(() => this.scene.isActive() && this.scene.start(this.lobbyScene, this.lobbyData));
+      return;
+    }
     if (this.online) void this.online.leave();
     this.scene.start(this.lobbyScene, this.lobbyData);
   }
@@ -856,7 +856,13 @@ export default class GameScene extends Phaser.Scene {
     this.showOnTop([results.shade, results.panel, ...contents, results.button.rect, results.button.label]);
     this.syncDom();
     this.showStandings();
-    this.animateResults(won && winners.length === 1);
+    this.animateResults(won && winners.length === 1, this.cheers(mine.place));
+  }
+
+  /** Whether the end of the game cheers for us: every game with friends, otherwise a 1st or 2nd place finish. */
+  private cheers(place: number) {
+    if (this.online && this.roomKind === "friends") return true;
+    return place <= 2;
   }
 
   /** Each row's numbers: land, and a ctf capture or (ranked, once it's in) the rating change. */
@@ -886,7 +892,7 @@ export default class GameScene extends Phaser.Scene {
    * The results arrive: the panel rises in, the rows follow one by one, and the land bars grow. A win rains live
    * cells in every player's colour behind the panel.
    */
-  private animateResults(celebrate: boolean) {
+  private animateResults(celebrate: boolean, cheer: boolean) {
     const r = this.results!;
     const head = [r.panel, r.crown, r.crownInitial, r.title, r.subtitle, r.bars, r.footer, r.button.rect, r.button.label];
     for (const o of head) {
@@ -909,10 +915,9 @@ export default class GameScene extends Phaser.Scene {
       ease: "Cubic.Out",
       onUpdate: () => this.drawResultBars(),
     });
-    if (celebrate) {
-      playUi(this, "confirm");
-      this.rainCells();
-    }
+    // the cheer (see cheers()); the shower of cells is for an outright win only
+    if (cheer) playUi(this, "win");
+    if (celebrate) this.rainCells();
   }
 
   /** A shower of live cells, in the players' colours and yellow, falling past the panel and gone in a few seconds. */
@@ -1056,7 +1061,7 @@ export default class GameScene extends Phaser.Scene {
     else if (e.key === "m" || e.key === "M") this.toggleSound();
     else if (e.key === "Enter" && this.online) {
       e.preventDefault();
-      this.chatInput.focus();
+      this.chatBox.input.focus();
     } else if (e.key === "+" || e.key === "=") this.zoomAtCenter(this.zoom * ZOOM_STEP);
     else if (e.key === "-" || e.key === "_") this.zoomAtCenter(this.zoom / ZOOM_STEP);
     else if (e.key === "0") {
@@ -1241,154 +1246,6 @@ export default class GameScene extends Phaser.Scene {
     layoutButton(p.button, px + 32, py + ph - 32 - BTN_H, pw - 64);
   }
 
-  /** The chat box: a label, the log, and a field to type in. Offline there's nobody to talk to, so it says so. */
-  private makeChat(font: string, display: string) {
-    // Phaser sets the outer element's display on every frame (to show or hide it), so the flex column goes inside it
-    const outer = document.createElement("div");
-    const box = document.createElement("div");
-    Object.assign(box.style, {
-      boxSizing: "border-box",
-      height: "100%",
-      display: "flex",
-      flexDirection: "column",
-      gap: "8px",
-      paddingTop: "14px",
-      borderTop: "2px solid #2b2448",
-    });
-    // "Chat", and on the right a switch that hides everyone's lines
-    const label = document.createElement("div");
-    Object.assign(label.style, { display: "flex", justifyContent: "space-between", alignItems: "baseline" });
-    const title = document.createElement("span");
-    title.textContent = "Chat";
-    Object.assign(title.style, { fontFamily: display, fontSize: "16px", color: "#d4ccff" });
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    Object.assign(toggle.style, {
-      background: "none",
-      border: "none",
-      padding: "0",
-      cursor: "pointer",
-      color: "#9a8ae0",
-      fontFamily: font,
-      fontSize: "13px",
-      fontWeight: "bold",
-    });
-    toggle.addEventListener("click", () => {
-      store(CHAT_OFF_KEY, !readStored<boolean>(CHAT_OFF_KEY, false));
-      this.renderChat();
-    });
-    toggle.hidden = !this.online;
-    label.append(title, toggle);
-    this.chatToggle = toggle;
-    const log = document.createElement("div");
-    log.setAttribute("role", "log");
-    log.setAttribute("aria-label", "Chat messages");
-    Object.assign(log.style, {
-      flex: "1",
-      minHeight: "0",
-      overflowY: "auto",
-      padding: "8px 10px",
-      background: "#15112a",
-      color: "#f8f5ff",
-      fontFamily: font,
-      fontSize: "14px",
-      lineHeight: "1.35",
-      overflowWrap: "anywhere",
-    });
-    const input = textInput(font, this.online ? "Say something…" : "Chat is for online games", CHAT_MAX);
-    Object.assign(input.style, { flex: "none", width: "100%", height: `${CHAT_INPUT_H}px`, fontSize: "15px", padding: "0 12px" });
-    input.disabled = !this.online;
-    if (!this.online) input.style.opacity = "0.5";
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") this.sendChat();
-      if (e.key === "Escape") input.blur();
-    });
-    box.append(label, log, input);
-    outer.append(box);
-    this.chatLog = log;
-    this.chatInput = input;
-    return outer;
-  }
-
-  private sendChat() {
-    const text = this.chatInput.value.trim();
-    if (!text || !this.online) return;
-    this.chatInput.value = "";
-    void this.online.sendChat(text).then((r) => {
-      if (r.ok || !this.scene.isActive()) return;
-      this.say(r.reason);
-      // give the line back, so it can be sent again
-      if (!this.chatInput.value) this.chatInput.value = text;
-    });
-  }
-
-  /** Show the room's chat, following the newest line unless the log was scrolled up to read. */
-  private renderChat() {
-    const log = this.chatLog;
-    const following = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
-    const note = (text: string) => {
-      const line = document.createElement("div");
-      line.textContent = text;
-      Object.assign(line.style, { color: "#9a8ae0", fontStyle: "italic" });
-      return line;
-    };
-    const messages = this.online?.chat ?? [];
-    const off = readStored<boolean>(CHAT_OFF_KEY, false);
-    const muted = new Set(mutedNames());
-    this.chatToggle.textContent = off ? "Unmute all" : "Mute all";
-    const mineFrom = (m: (typeof messages)[number]) => m.from === this.online?.id;
-    // your own lines always show; muted players' don't
-    const shown = messages.filter((m) => mineFrom(m) || (!off && !muted.has(m.name.toLowerCase())));
-    const hidden = messages.length - shown.length;
-    if (!this.online) log.replaceChildren(note("Play with friends, classic or ranked to chat with the other players."));
-    else if (!messages.length) log.replaceChildren(note(off ? "Chat is muted." : "No messages yet. Say hi! Click a name to mute that player."));
-    else {
-      log.replaceChildren(
-        ...shown.map((m) => {
-          // textContent, never HTML: these come from other players
-          const line = document.createElement("div");
-          const who = document.createElement("span");
-          who.textContent = mineFrom(m) ? "You" : m.name;
-          Object.assign(who.style, { fontWeight: "bold", color: `#${(PALETTE[m.color]?.color ?? 0xd4ccff).toString(16).padStart(6, "0")}` });
-          // click someone else's name to mute them
-          if (!mineFrom(m)) {
-            Object.assign(who.style, { cursor: "pointer" });
-            who.title = `Mute ${m.name}`;
-            who.addEventListener("click", () => this.setMuted(m.name, true));
-          }
-          line.append(who, `: ${m.text}`);
-          return line;
-        }),
-      );
-      if (off) log.append(note(`Chat is muted${hidden ? ` (${hidden} hidden)` : ""}.`));
-      // muted players are listed, each a click away from being heard again
-      const mutedHere = [...new Set(messages.filter((m) => !mineFrom(m) && muted.has(m.name.toLowerCase())).map((m) => m.name))];
-      if (!off && mutedHere.length) {
-        const line = note("Muted: ");
-        mutedHere.forEach((name, i) => {
-          const undo = document.createElement("span");
-          undo.textContent = name;
-          undo.title = `Unmute ${name}`;
-          Object.assign(undo.style, { cursor: "pointer", textDecoration: "underline" });
-          undo.addEventListener("click", () => this.setMuted(name, false));
-          line.append(...(i ? [", "] : []), undo);
-        });
-        log.append(line);
-      }
-    }
-    const mine = messages.at(-1)?.from === this.online?.id;
-    if (following || mine) log.scrollTop = log.scrollHeight;
-  }
-
-  /** Mute or unmute a player's chat, by name, in every game in this browser. */
-  private setMuted(name: string, mute: boolean) {
-    const muted = new Set(mutedNames());
-    if (mute) muted.add(name.toLowerCase());
-    else muted.delete(name.toLowerCase());
-    store(MUTED_KEY, [...muted]);
-    this.renderChat();
-  }
-
   /**
    * The zoom field and the chat are HTML, so they'd sit on top of an overlay: they hide while one is open. The
    * sidebar's camera can't clip the zoom field either, so it hides once scrolled even partly out of view. Narrow
@@ -1401,7 +1258,7 @@ export default class GameScene extends Phaser.Scene {
     this.zoomInput.setVisible(this.wide && clear && inView);
     // the chat is made after the zoom field, so an early call can come before it exists
     this.chat?.setVisible(clear);
-    if (!clear && document.activeElement === this.chatInput) this.chatInput.blur();
+    if (!clear) this.chatBox?.blur();
   }
 
   /** Overlay objects show on the top camera only, above the board and the sidebar's contents. */
@@ -1865,30 +1722,6 @@ export default class GameScene extends Phaser.Scene {
       this.redraw();
     }
     this.updatePhaseText();
-  }
-}
-
-/** The chat's muted players, lowercased. Anything else under that key (an older build once wrote a number there) counts as none. */
-function mutedNames(): string[] {
-  const v = readStored<unknown>(MUTED_KEY, []);
-  return Array.isArray(v) ? v.filter((n): n is string => typeof n === "string") : [];
-}
-
-/** A setting saved in this browser, or `fallback` when there's none (or storage is off, e.g. private browsing). */
-function readStored<T>(key: string, fallback: T): T {
-  try {
-    const v = localStorage.getItem(key);
-    return v === null ? fallback : (JSON.parse(v) as T);
-  } catch {
-    return fallback;
-  }
-}
-
-function store(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // storage is blocked (some private modes): the setting just isn't kept
   }
 }
 

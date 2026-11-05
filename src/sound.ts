@@ -20,12 +20,15 @@ let lastPlacePop = 0;
 /**
  * One-off sounds, from Kenney's Interface Sounds (CC0): select when a button is clicked, confirmation when you look
  * for a match or a game starts, and a scratch when a flag is captured. Ogg with an MP3 copy, for browsers without Ogg.
+ * And a cheer when you win: "yay.wav" by Higgs01 (https://freesound.org/s/428156/), CC0, credited on the home screen
+ * and in the README; WAV plays in every browser.
  */
-export type UiSound = "select" | "confirm" | "capture";
-const UI_SOUNDS: Record<UiSound, { key: string; file: string; volume: number }> = {
-  select: { key: "ui-select", file: "select_006", volume: 0.4 },
-  confirm: { key: "ui-confirm", file: "confirmation_001", volume: 0.5 },
-  capture: { key: "fx-capture", file: "scratch_004", volume: 0.6 },
+export type UiSound = "select" | "confirm" | "capture" | "win";
+const UI_SOUNDS: Record<UiSound, { key: string; files: string[]; volume: number }> = {
+  select: { key: "ui-select", files: ["select_006.ogg", "select_006.mp3"], volume: 0.4 },
+  confirm: { key: "ui-confirm", files: ["confirmation_001.ogg", "confirmation_001.mp3"], volume: 0.5 },
+  capture: { key: "fx-capture", files: ["scratch_004.ogg", "scratch_004.mp3"], volume: 0.6 },
+  win: { key: "fx-win", files: ["yay.wav"], volume: 0.6 },
 };
 
 /** Music: bass_background behind the menus, the playground and the tutorial; gameplay while a game is on. */
@@ -99,8 +102,8 @@ export function loadSounds(scene: Phaser.Scene) {
  */
 export function loadEffects(scene: Phaser.Scene) {
   loadSounds(scene);
-  for (const { key, file } of Object.values(UI_SOUNDS)) {
-    if (!scene.cache.audio.exists(key)) scene.load.audio(key, [`${file}.ogg`, `${file}.mp3`]);
+  for (const { key, files } of Object.values(UI_SOUNDS)) {
+    if (!scene.cache.audio.exists(key)) scene.load.audio(key, files);
   }
   if (scene.load.list.size > 0 && !scene.load.isLoading()) scene.load.start();
 }

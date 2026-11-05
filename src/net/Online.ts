@@ -272,8 +272,27 @@ export default class Online extends Phaser.Events.EventEmitter {
     return r;
   }
 
+  /** Give up our seat in the running game but stay in the room, waiting in the lobby for the next one. */
+  async sitOut(): Promise<Result> {
+    const r = await this.request((s) => s.emitWithAck("room:sitOut"));
+    // the game goes on without us; what we last saw of it is no use in the lobby (if we're somehow still
+    // seated, the next broadcast brings it back)
+    this.state = null;
+    return r;
+  }
+
   setColor(color: number) {
     return this.request((s) => s.emitWithAck("lobby:color", { color }));
+  }
+
+  /** Say we're set for the next game, or take it back. */
+  setReady(ready: boolean) {
+    return this.request((s) => s.emitWithAck("lobby:ready", { ready }));
+  }
+
+  /** Host: hide rivals' placements during placement phases, or show them. */
+  setHideSetup(hide: boolean) {
+    return this.request((s) => s.emitWithAck("lobby:hideSetup", { hide }));
   }
 
   setBots(bots: number) {

@@ -20,8 +20,30 @@ const BUTTON_GAP = 12;
 const WIDE = 860;
 const COLUMN_GAP = 56;
 // CC BY 4.0 asks for the title, author, source, licence and any changes; clicking the line opens the source
-const SOUND_CREDIT = '"Pop_9.aif" by SunnySideSound, CC BY 4.0, converted to Ogg and MP3 and made louder: the pop of newborn cells.';
-const SOUND_SOURCE = "https://freesound.org/s/67095/";
+// the sounds' credits, one line each, this far apart; clicking a line opens its source
+const CREDIT_GAP = 8;
+const SOUND_CREDITS = [
+  {
+    text: '"Pop_9.aif" by SunnySideSound, CC BY 4.0, converted to Ogg and MP3 and made louder: the pop of newborn cells.',
+    source: "https://freesound.org/s/67095/",
+  },
+  { text: '"yay.wav" by Higgs01, CC0: the cheer when you win.', source: "https://freesound.org/s/428156/" },
+];
+// bug reports and suggestions open the player's mail app, addressed and titled
+const CONTACT_EMAIL = "noromon2035@gmail.com";
+const BUG_REPORT = {
+  subject: "Bug Report - Cellulose",
+  body: "What happened:\n\n\nWhat you expected to happen:\n\n\nSteps to make it happen again:\n1. \n2. \n3. \n\nDevice and browser:\n",
+};
+const SUGGESTION = {
+  subject: "Suggest Improvement - Cellulose",
+  body: "Your idea:\n\n\nWhy it would make the game better:\n\n",
+};
+
+/** Open a new email to the developer in the player's mail app. */
+function compose({ subject, body }: { subject: string; body: string }) {
+  window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
 
 /**
  * Title screen: the game's name, a row of gliders in the player colours, and play with bots, with friends,
@@ -40,8 +62,8 @@ export default class HomeScene extends Phaser.Scene {
   private gliders!: Phaser.GameObjects.Graphics;
   private buttons!: Button[];
   private blurb!: Phaser.GameObjects.Text;
-  // the sound's credit, under the blurb
-  private credit!: Phaser.GameObjects.Text;
+  // the sounds' credits, under the blurb
+  private credits!: Phaser.GameObjects.Text[];
   // who's playing, top right, with Settings, Account and Log out under it
   private profileMenu!: ProfileMenu;
 
@@ -58,13 +80,18 @@ export default class HomeScene extends Phaser.Scene {
     const guest = !online.profile;
     const font = fontFamily();
     const display = displayFont();
-    // who's playing, top right: Settings, Account and Log out (or, for a guest, Sign in) drop down from it
+    // who's playing, top right: Settings, Account, the feedback emails and Log out (or, for a guest, Sign in) drop down from it
+    const feedback = [
+      { label: "Report a bug", onClick: () => compose(BUG_REPORT) },
+      { label: "Suggest improvement", onClick: () => compose(SUGGESTION) },
+    ];
     this.profileMenu = new ProfileMenu(this, [
       { label: "Settings", onClick: () => this.scene.start("SettingsScene") },
       ...(guest
-        ? [{ label: "Sign in", onClick: () => online.leaveGuest() }]
+        ? [...feedback, { label: "Sign in", onClick: () => online.leaveGuest() }]
         : [
             { label: "Account", onClick: () => this.scene.start("AccountScene") },
+            ...feedback,
             // signing out emits "auth", which goes back to the sign-in screen
             { label: "Log out", onClick: () => void online.logout() },
           ]),
@@ -105,12 +132,14 @@ export default class HomeScene extends Phaser.Scene {
       lineSpacing: 4,
     });
 
-    this.credit = this.add
-      .text(0, 0, SOUND_CREDIT, { fontFamily: font, fontSize: "12px", color: "#9a8ae0", lineSpacing: 2 })
-      .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => this.credit.setColor("#ffe03d"))
-      .on("pointerout", () => this.credit.setColor("#9a8ae0"))
-      .on("pointerdown", () => window.open(SOUND_SOURCE, "_blank", "noopener,noreferrer"));
+    this.credits = SOUND_CREDITS.map(({ text, source }) => {
+      const t = this.add
+        .text(0, 0, text, { fontFamily: font, fontSize: "12px", color: "#9a8ae0", lineSpacing: 2 })
+        .setInteractive({ useHandCursor: true })
+        .on("pointerdown", () => window.open(source, "_blank", "noopener,noreferrer"));
+      t.on("pointerover", () => t.setColor("#ffe03d")).on("pointerout", () => t.setColor("#9a8ae0"));
+      return t;
+    });
 
     this.card = new RankCard(this);
 
@@ -138,7 +167,7 @@ export default class HomeScene extends Phaser.Scene {
     const titleW = this.title.reduce((w, t) => w + t.width, 0);
     if (titleW > colW) for (const t of this.title) t.setFontSize(Math.floor((72 * colW) / titleW));
     const titleH = this.title[0].height;
-    for (const t of [this.subtitle, this.blurb, this.credit]) {
+    for (const t of [this.subtitle, this.blurb, ...this.credits]) {
       t.setWordWrapWidth(colW).setAlign(wide ? "left" : "center").setOrigin(wide ? 0 : 0.5, 0);
     }
 
@@ -146,8 +175,8 @@ export default class HomeScene extends Phaser.Scene {
     const glidersH = cell * 3;
     const glidersW = PALETTE.length * cell * 3 + (PALETTE.length - 1) * GLIDER_GAP;
     const buttonsH = this.buttons.length * (BTN_H + BUTTON_GAP) - BUTTON_GAP;
-    // the blurb, with the sound's credit under it
-    const blurbH = this.blurb.height + 10 + this.credit.height;
+    // the blurb, with the sounds' credits under it
+    const blurbH = this.blurb.height + this.credits.reduce((h, t) => h + CREDIT_GAP + t.height, 0);
     const columnH = titleH + 8 + this.subtitle.height + 32 + glidersH + 40 + buttonsH + 28 + blurbH;
 
     const cardNeed = this.card.measure(cardW, wide);
@@ -176,7 +205,11 @@ export default class HomeScene extends Phaser.Scene {
       this.card.layout(x, cardY, cardW, cardH);
       this.blurb.setPosition(width / 2, cardY + cardH + footH + 28);
     }
-    this.credit.setPosition(this.blurb.x, this.blurb.y + this.blurb.height + 10);
+    let cy = this.blurb.y + this.blurb.height;
+    for (const t of this.credits) {
+      t.setPosition(this.blurb.x, cy + CREDIT_GAP);
+      cy += CREDIT_GAP + t.height;
+    }
   }
 
   /** The title, subtitle, gliders, buttons and blurb, from (x, y) down, left-aligned or centred in the column. */

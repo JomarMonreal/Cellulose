@@ -8,7 +8,8 @@ const DISC = 36;
 // the disc behind the initial when there's no picture (the Account screen's preview uses the same)
 const NO_PICTURE = 0x8b3bdb;
 const ITEM_H = 40;
-const MENU_W = 180;
+// wide enough for "Suggest improvement"
+const MENU_W = 250;
 const MENU_PAD = 6;
 // over everything else on the screen
 const DEPTH = 100;

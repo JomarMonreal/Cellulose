@@ -78,6 +78,7 @@ src/
 ## Credits
 
 - The pop of newborn cells is ["Pop_9.aif"](https://freesound.org/s/67095/) by SunnySideSound, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It's converted from AIFF to `public/pop.ogg` and `public/pop.mp3`, since most browsers can't play AIFF, and raised 21 dB (the original peaks at -22 dB). The game credits it on the home screen too.
+- The cheer when you win is ["yay.wav"](https://freesound.org/s/428156/) by Higgs01, licensed under [CC0](https://creativecommons.org/publicdomain/zero/1.0/), used as is (`public/yay.wav`). The game credits it on the home screen too.
 - The button, match and flag-capture sounds (`select_006`, `confirmation_001`, `scratch_004`) are from [Kenney's Interface Sounds](https://kenney.nl/assets/interface-sounds) (CC0), each with an MP3 copy for browsers without Ogg.
 - The PayPal mark on the sign-in screen (`public/paypal.svg`) is from [Simple Icons](https://simpleicons.org) (CC0); the GCash and Maya logos are cut from their own QR cards.
 

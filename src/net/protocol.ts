@@ -22,12 +22,17 @@ export type Result<T = object> = ({ ok: true } & T) | { ok: false; reason: strin
 /** `id` is public (find yourself in the lobby with it); `token` is secret (it proves it's you on a rejoin). */
 export type JoinReply = Result<{ roomId: string; id: string; seat: number; token: string }>;
 
-/** `seat` is the board seat while a game runs, otherwise the place in the join order. */
+/**
+ * `seat` is the board seat while a game runs (-1 for someone waiting in the lobby for the next game), otherwise the
+ * place in the join order.
+ */
 /** `avatar`: a signed-in member's picture (see Profile.avatar); null for guests and players without one. */
-export type LobbyMember = { id: string; seat: number; name: string; color: number; connected: boolean; host: boolean; avatar: string | null };
+/** `ready`: said they're set for the next game (friends rooms; the host starts it instead, and is never marked ready). */
+export type LobbyMember = { id: string; seat: number; name: string; color: number; connected: boolean; host: boolean; avatar: string | null; ready: boolean };
 
 export type LobbyState = {
   roomId: string;
+  /** playing: a game is running; members whose seat is -1 are waiting in the lobby for the next one. */
   status: "lobby" | "playing";
   mode: Mode;
   /** friends: made by a host, joined by code. classic/ranked: made by matchmaking, with no host, no bots, and nobody else can join. */
@@ -36,6 +41,8 @@ export type LobbyState = {
   /** Bots that will fill the remaining seats when the game starts. */
   bots: number;
   maxPlayers: number;
+  /** During placement phases each player sees only their own new cells; rivals' appear when the phase ends. */
+  hideSetup: boolean;
 };
 
 export type PlayerState = {
@@ -195,12 +202,18 @@ export interface ClientToServerEvents {
   /** Take back a seat after a dropped connection, using the token from create/join. */
   "room:rejoin": (req: { roomId: string; token: string }, ack: (r: JoinReply) => void) => void;
   "room:leave": (ack?: (r: Result) => void) => void;
+  /** Give up your seat in the running game but stay in the room, waiting in the lobby for the next one. */
+  "room:sitOut": (ack?: (r: Result) => void) => void;
   "lobby:color": (req: { color: number }, ack?: (r: Result) => void) => void;
+  /** Friends rooms: say you're set for the next game, or take it back. The host can start once everyone is. */
+  "lobby:ready": (req: { ready: boolean }, ack?: (r: Result) => void) => void;
+  /** Host only: hide rivals' placements during placement phases. */
+  "lobby:hideSetup": (req: { hide: boolean }, ack?: (r: Result) => void) => void;
   /** Host only. */
   "lobby:bots": (req: { bots: number }, ack?: (r: Result) => void) => void;
   /** Host only. */
   "lobby:mode": (req: { mode: Mode }, ack?: (r: Result) => void) => void;
-  /** Host only: start a game, or a new one after the last is over. */
+  /** Host only: start a game, or a new one after the last is over. Everyone else connected must be ready. */
   "room:start": (ack?: (r: Result) => void) => void;
   /** Queued and answered on the room's next tick, once validated against the true board. */
   "game:action": (action: GameAction, ack?: (r: Result) => void) => void;
@@ -242,7 +255,10 @@ export interface ClientToServerEvents {
 
 export interface ServerToClientEvents {
   "room:lobby": (state: LobbyState) => void;
-  /** A full snapshot: at the start, on phase changes, after a rejoin or game:sync, and every few seconds. */
+  /**
+   * A full snapshot: at the start, on phase changes, after a rejoin or game:sync, and every few seconds. Game
+   * broadcasts go only to seated players, and with hideSetup each sees only their own cells placed this phase.
+   */
   "game:state": (state: GameState) => void;
   /** Most broadcasts: just what changed. */
   "game:delta": (delta: GameDelta) => void;
