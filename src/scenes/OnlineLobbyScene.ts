@@ -223,7 +223,7 @@ export default class OnlineLobbyScene extends Phaser.Scene {
     this.title.setText(lobby ? "Your room" : "Play with friends");
     if (lobby) (this.roomCode.node as HTMLInputElement).value = lobby.roomId;
     this.status.setText(
-      online.connectionStatus ?? (lobby ? "Share the room code so friends can join." : `Connected to ${SERVER_URL}`),
+      online.connectionStatus ?? (lobby ? "Share the room code so friends can join." : `Connected online`),
     );
     this.errorText.setText(this.error);
 
