@@ -81,5 +81,11 @@ src/
 - The cheer when you win is ["yay.wav"](https://freesound.org/s/428156/) by Higgs01, licensed under [CC0](https://creativecommons.org/publicdomain/zero/1.0/), used as is (`public/yay.wav`). The game credits it on the home screen too.
 - The button, match and flag-capture sounds (`select_006`, `confirmation_001`, `scratch_004`) are from [Kenney's Interface Sounds](https://kenney.nl/assets/interface-sounds) (CC0), each with an MP3 copy for browsers without Ogg.
 - The PayPal mark on the sign-in screen (`public/paypal.svg`) is from [Simple Icons](https://simpleicons.org) (CC0); the GCash and Maya logos are cut from their own QR cards.
+- The display typeface (`public/ARCO.ttf`) is [Arco](https://www.dafont.com/arco.font) by Rafael Olivo, which its author offers free for personal and commercial use. It stays under the author's terms, not this repository's LICENSE.
+- The music (`public/bass_background.mp3` on the menus, `public/gameplay.mp3` in games) is original, made for Cellulose by Noromon Studio, and covered by [LICENSE](LICENSE).
+
+## License
+
+All rights reserved; see [LICENSE](LICENSE). The source is here to read, not to reuse. Ask if you'd like to use any of it.
 
 History before the split lives in the NoromonStudio repo, up to commit `5af584b`.
